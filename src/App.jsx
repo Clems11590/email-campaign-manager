@@ -83,41 +83,130 @@ const EmailManagementTool = () => {
     setShowAddModal(false);
   };
 
-  // Import CSV
+  // Import CSV avec parsing amélioré
   const handleCSVImport = (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     const reader = new FileReader();
     reader.onload = (event) => {
-      const text = event.target.result;
-      const lines = text.split('\n');
-      const headers = lines[0].split(',').map(h => h.trim());
-      
-      const newEmails = [];
-      for (let i = 1; i < lines.length; i++) {
-        if (!lines[i].trim()) continue;
-        const values = lines[i].split(',').map(v => v.trim());
-        const emailObj = {};
-        headers.forEach((header, index) => {
-          emailObj[header.toLowerCase().replace(/\s+/g, '')] = values[index];
-        });
+      try {
+        const text = event.target.result;
         
-        if (emailObj.dateenvoi || emailObj.date) {
-          newEmails.push({
-            dateEnvoi: emailObj.dateenvoi || emailObj.date,
-            titre: emailObj.titre || emailObj.title || '',
-            thematique: emailObj.thematique || emailObj.theme || '',
-            langue: emailObj.langue || emailObj.language || 'FR',
-            brief: emailObj.brief || ''
-          });
-        }
-      }
+        // Parser CSV en gérant les guillemets et virgules dans les valeurs
+        const parseCSVLine = (line) => {
+          const result = [];
+          let current = '';
+          let inQuotes = false;
+          
+          for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            const nextChar = line[i + 1];
+            
+            if (char === '"') {
+              if (inQuotes && nextChar === '"') {
+                current += '"';
+                i++; // Skip next quote
+              } else {
+                inQuotes = !inQuotes;
+              }
+            } else if (char === ',' && !inQuotes) {
+              result.push(current.trim());
+              current = '';
+            } else {
+              current += char;
+            }
+          }
+          result.push(current.trim());
+          return result;
+        };
 
-      newEmails.forEach(email => addEmail(email));
-      setShowImportModal(false);
+        // Séparer les lignes en gérant différents types de retours à la ligne
+        const lines = text.split(/\r?\n/).filter(line => line.trim());
+        
+        if (lines.length < 2) {
+          alert('❌ Le fichier CSV est vide ou invalide. Il doit contenir au moins une ligne d\'en-têtes et une ligne de données.');
+          return;
+        }
+
+        // Parser les en-têtes
+        const headers = parseCSVLine(lines[0]).map(h => 
+          h.toLowerCase()
+            .replace(/\s+/g, '')
+            .replace(/[éèêë]/g, 'e')
+            .replace(/[àâä]/g, 'a')
+        );
+        
+        console.log('En-têtes détectés:', headers);
+
+        // Vérifier que les colonnes essentielles existent
+        const hasDate = headers.some(h => h.includes('date') || h === 'dateenvoi');
+        const hasTitle = headers.some(h => h.includes('titre') || h.includes('title'));
+        
+        if (!hasDate) {
+          alert('❌ Colonne "date" ou "dateenvoi" manquante dans le CSV.');
+          return;
+        }
+
+        const newEmails = [];
+        let importedCount = 0;
+        let skippedCount = 0;
+
+        // Parser chaque ligne
+        for (let i = 1; i < lines.length; i++) {
+          if (!lines[i].trim()) continue;
+          
+          const values = parseCSVLine(lines[i]);
+          const emailObj = {};
+          
+          // Mapper les valeurs aux en-têtes
+          headers.forEach((header, index) => {
+            emailObj[header] = values[index] || '';
+          });
+
+          // Trouver la date (supporter différents noms de colonnes)
+          const dateValue = emailObj.dateenvoi || emailObj.date || emailObj.dateenvoie || 
+                           emailObj.datedenvoi || emailObj.senddate;
+
+          if (dateValue && dateValue.trim()) {
+            newEmails.push({
+              dateEnvoi: dateValue.trim(),
+              titre: emailObj.titre || emailObj.title || emailObj.nom || 'Sans titre',
+              thematique: emailObj.thematique || emailObj.theme || emailObj.type || '',
+              langue: emailObj.langue || emailObj.language || emailObj.lang || 'FR',
+              brief: emailObj.brief || emailObj.description || emailObj.message || ''
+            });
+            importedCount++;
+          } else {
+            console.warn(`Ligne ${i + 1} ignorée (pas de date):`, values);
+            skippedCount++;
+          }
+        }
+
+        if (newEmails.length === 0) {
+          alert('❌ Aucun email valide trouvé dans le CSV.\n\nVérifiez que :\n- Il y a une colonne "dateenvoi" ou "date"\n- Les lignes contiennent des dates valides');
+          return;
+        }
+
+        // Ajouter tous les emails
+        newEmails.forEach(email => addEmail(email));
+        
+        // Message de confirmation
+        alert(`✅ Import réussi !\n\n${importedCount} email(s) importé(s)${skippedCount > 0 ? `\n${skippedCount} ligne(s) ignorée(s) (pas de date)` : ''}`);
+        
+        setShowImportModal(false);
+        
+      } catch (error) {
+        console.error('Erreur lors de l\'import CSV:', error);
+        alert('❌ Erreur lors de l\'import du CSV.\n\n' + error.message + '\n\nVérifiez le format de votre fichier.');
+      }
     };
-    reader.readAsText(file);
+    
+    reader.onerror = () => {
+      alert('❌ Erreur lors de la lecture du fichier.');
+    };
+    
+    reader.readAsText(file, 'UTF-8');
   };
 
   // Calculer les alertes
@@ -489,29 +578,70 @@ const EmailManagementTool = () => {
       {/* Modal Import CSV */}
       {showImportModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-8 max-w-2xl w-full border-4 border-orange-300">
+          <div className="bg-white rounded-2xl p-8 max-w-3xl w-full border-4 border-orange-300 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold gradient-text">Importer un fichier CSV</h2>
               <button onClick={() => setShowImportModal(false)} className="text-gray-500 hover:text-gray-700">
                 <X size={24} />
               </button>
             </div>
-            <div className="mb-6">
-              <p className="text-sm text-gray-600 mb-4">
-                Format attendu : Date d'envoi, Titre, Thématique, Langue, Brief
-              </p>
-              <p className="text-xs text-gray-500 mb-4 mono bg-orange-50 p-3 rounded-lg">
-                Exemple :<br />
-                dateenvoi,titre,thematique,langue,brief<br />
-                2024-03-15,Nouvelle collection,Nouveauté,FR,Présentation des nouveaux produits
-              </p>
-              <input
-                type="file"
-                accept=".csv"
-                onChange={handleCSVImport}
-                className="w-full px-4 py-3 border-2 border-dashed border-orange-300 rounded-lg hover:border-orange-500 cursor-pointer"
-              />
+            
+            <div className="mb-6 space-y-4">
+              <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
+                <h3 className="font-bold text-blue-900 mb-2">📋 Format attendu</h3>
+                <p className="text-sm text-blue-800 mb-2">
+                  Votre CSV doit contenir ces colonnes (l'ordre n'a pas d'importance) :
+                </p>
+                <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+                  <li><strong>dateenvoi</strong> ou <strong>date</strong> (obligatoire) - Format : YYYY-MM-DD ou DD/MM/YYYY</li>
+                  <li><strong>titre</strong> ou <strong>title</strong> (recommandé) - Le nom de votre campagne</li>
+                  <li><strong>thematique</strong> ou <strong>theme</strong> (optionnel) - Ex: Nouveauté, Promotion, etc.</li>
+                  <li><strong>langue</strong> ou <strong>lang</strong> (optionnel) - Ex: FR, EN, ES, IT</li>
+                  <li><strong>brief</strong> ou <strong>description</strong> (optionnel) - Description de la campagne</li>
+                </ul>
+              </div>
+
+              <div className="bg-orange-50 border-2 border-orange-200 rounded-lg p-4">
+                <h3 className="font-bold text-orange-900 mb-2">✅ Exemple valide</h3>
+                <pre className="text-xs mono bg-white p-3 rounded border border-orange-200 overflow-x-auto">
+{`dateenvoi,titre,thematique,langue,brief
+2024-03-15,Nouvelle collection printemps,Nouveauté,FR,Découvrez nos nouveautés
+2024-03-20,Vente Flash 48h,Promotion,FR,50% sur tout le site
+2024-03-25,Black Friday Preview,Promotion,EN,Early access deals`}
+                </pre>
+              </div>
+
+              <div className="bg-green-50 border-2 border-green-200 rounded-lg p-4">
+                <h3 className="font-bold text-green-900 mb-2">💡 Astuces</h3>
+                <ul className="text-sm text-green-800 space-y-1 list-disc list-inside">
+                  <li>Vous pouvez exporter depuis Excel en choisissant "CSV UTF-8"</li>
+                  <li>Les noms de colonnes ne sont pas sensibles aux accents ou à la casse</li>
+                  <li>Les lignes sans date seront automatiquement ignorées</li>
+                  <li>Si le titre est vide, il sera remplacé par "Sans titre"</li>
+                </ul>
+              </div>
+
+              <div className="border-2 border-dashed border-orange-300 rounded-lg p-6 text-center hover:border-orange-500 transition-all">
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={handleCSVImport}
+                  className="hidden"
+                  id="csv-upload"
+                />
+                <label 
+                  htmlFor="csv-upload"
+                  className="cursor-pointer flex flex-col items-center gap-3"
+                >
+                  <Upload size={48} className="text-orange-500" />
+                  <div>
+                    <p className="font-bold text-gray-800">Cliquez pour choisir un fichier CSV</p>
+                    <p className="text-sm text-gray-600">ou glissez-déposez ici</p>
+                  </div>
+                </label>
+              </div>
             </div>
+
             <div className="flex gap-3">
               <button onClick={() => setShowImportModal(false)} className="btn-secondary flex-1">
                 Annuler
