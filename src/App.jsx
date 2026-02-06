@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, Plus, Search, Calendar, Filter, AlertCircle, CheckCircle, Clock, TrendingUp, Download, X } from 'lucide-react';
+import { Upload, Plus, Search, Calendar, Filter, AlertCircle, CheckCircle, Clock, TrendingUp, Download, X, Trash2, Archive, ArchiveRestore } from 'lucide-react';
 
 // Simulated Supabase storage (will be replaced with actual Supabase in production)
 const useLocalStorage = (key, initialValue) => {
@@ -37,6 +37,7 @@ const EmailManagementTool = () => {
     batValide: false,
     dansSRE: false,
     pasDansSRE: false,
+    archives: false,
     thematique: '',
     langue: '',
     dateDebut: '',
@@ -74,6 +75,8 @@ const EmailManagementTool = () => {
       dateValidationBAT: '',
       dansPlanningsSRE: false,
       dateAjoutSRE: '',
+      archived: false,
+      archivedAt: '',
       createdAt: new Date().toISOString()
     };
 
@@ -226,6 +229,14 @@ const EmailManagementTool = () => {
   const getFilteredEmails = () => {
     let filtered = emails[activeEntity] || [];
 
+    // Par défaut, ne pas afficher les emails archivés sauf si le filtre est activé
+    if (!filters.archives) {
+      filtered = filtered.filter(e => !e.archived);
+    } else {
+      // Si le filtre archives est activé, montrer SEULEMENT les archivés
+      filtered = filtered.filter(e => e.archived);
+    }
+
     if (filters.creaRealisee) {
       filtered = filtered.filter(e => e.creaRealisee);
     }
@@ -266,6 +277,27 @@ const EmailManagementTool = () => {
       };
       setEmails(updatedEmails);
     }
+  };
+
+  // Supprimer un email
+  const deleteEmail = (emailId) => {
+    if (window.confirm('⚠️ Êtes-vous sûr de vouloir supprimer cet email ?\n\nCette action est irréversible.')) {
+      const updatedEmails = { ...emails };
+      updatedEmails[activeEntity] = updatedEmails[activeEntity].filter(e => e.id !== emailId);
+      setEmails(updatedEmails);
+    }
+  };
+
+  // Archiver un email
+  const archiveEmail = (emailId) => {
+    if (window.confirm('📦 Archiver cet email ?\n\nL\'email sera marqué comme archivé et pourra être filtré.')) {
+      updateEmail(emailId, { archived: true, archivedAt: new Date().toISOString() });
+    }
+  };
+
+  // Désarchiver un email
+  const unarchiveEmail = (emailId) => {
+    updateEmail(emailId, { archived: false, archivedAt: '' });
   };
 
   return (
@@ -494,6 +526,15 @@ const EmailManagementTool = () => {
                   />
                   <span className="text-sm font-medium">Pas dans SRE</span>
                 </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="checkbox-custom"
+                    checked={filters.archives}
+                    onChange={(e) => setFilters({ ...filters, archives: e.target.checked })}
+                  />
+                  <span className="text-sm font-medium">📦 Emails archivés</span>
+                </label>
                 <input
                   type="text"
                   placeholder="Thématique..."
@@ -507,10 +548,11 @@ const EmailManagementTool = () => {
                   onChange={(e) => setFilters({ ...filters, langue: e.target.value })}
                 >
                   <option value="">Toutes langues</option>
-                  <option value="FR">FR</option>
-                  <option value="EN">EN</option>
-                  <option value="ES">ES</option>
-                  <option value="IT">IT</option>
+                  <option value="FR">FR - Français</option>
+                  <option value="EN">EN - Anglais</option>
+                  <option value="DE">DE - Allemand</option>
+                  <option value="ES">ES - Espagnol</option>
+                  <option value="IT">IT - Italien</option>
                 </select>
                 <input
                   type="date"
@@ -531,6 +573,7 @@ const EmailManagementTool = () => {
                   batValide: false,
                   dansSRE: false,
                   pasDansSRE: false,
+                  archives: false,
                   thematique: '',
                   langue: '',
                   dateDebut: '',
@@ -556,6 +599,9 @@ const EmailManagementTool = () => {
                     key={email.id}
                     email={email}
                     onUpdate={(updates) => updateEmail(email.id, updates)}
+                    onDelete={() => deleteEmail(email.id)}
+                    onArchive={() => archiveEmail(email.id)}
+                    onUnarchive={() => unarchiveEmail(email.id)}
                     alert={getAlertStatus(email.dateEnvoi)}
                   />
                 ))
@@ -655,27 +701,35 @@ const EmailManagementTool = () => {
 };
 
 // Composant Card Email
-const EmailCard = ({ email, onUpdate, alert }) => {
+const EmailCard = ({ email, onUpdate, onDelete, onArchive, onUnarchive, alert }) => {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="bg-white/90 backdrop-blur-lg rounded-2xl p-6 border-2 border-orange-200 card-hover">
+    <div className={`bg-white/90 backdrop-blur-lg rounded-2xl p-6 border-2 card-hover ${
+      email.archived ? 'border-gray-300 opacity-75' : 'border-orange-200'
+    }`}>
       <div className="flex items-start justify-between mb-4">
         <div className="flex-1">
           <div className="flex items-center gap-3 mb-2">
             <h3 className="text-xl font-bold text-gray-800">{email.titre}</h3>
-            {alert.show && (
+            {email.archived && (
+              <span className="bg-gray-200 text-gray-700 text-xs px-3 py-1 rounded-full font-semibold flex items-center gap-1">
+                <Archive size={12} />
+                Archivé
+              </span>
+            )}
+            {!email.archived && alert.show && (
               <span className="alert-badge bg-red-500 text-white text-xs px-3 py-1 rounded-full font-semibold flex items-center gap-1">
                 <AlertCircle size={14} />
                 J-{alert.days}
               </span>
             )}
-            {!email.dansPlanningsSRE && (
+            {!email.archived && !email.dansPlanningsSRE && (
               <span className="bg-yellow-100 text-yellow-700 text-xs px-3 py-1 rounded-full font-semibold">
                 À ajouter au planning SRE
               </span>
             )}
-            {email.batValide && !email.dateValidationBAT && (
+            {!email.archived && email.batValide && !email.dateValidationBAT && (
               <span className="bg-blue-100 text-blue-700 text-xs px-3 py-1 rounded-full font-semibold">
                 À mettre dans le planning SRE – BAT validé
               </span>
@@ -694,12 +748,38 @@ const EmailCard = ({ email, onUpdate, alert }) => {
             </span>
           </div>
         </div>
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="text-orange-600 hover:text-orange-700 font-semibold text-sm"
-        >
-          {expanded ? 'Réduire' : 'Développer'}
-        </button>
+        <div className="flex items-center gap-2">
+          {email.archived ? (
+            <button
+              onClick={onUnarchive}
+              className="p-2 hover:bg-green-50 rounded-lg transition-colors group"
+              title="Désarchiver"
+            >
+              <ArchiveRestore size={20} className="text-green-600 group-hover:text-green-700" />
+            </button>
+          ) : (
+            <button
+              onClick={onArchive}
+              className="p-2 hover:bg-gray-100 rounded-lg transition-colors group"
+              title="Archiver"
+            >
+              <Archive size={20} className="text-gray-600 group-hover:text-gray-700" />
+            </button>
+          )}
+          <button
+            onClick={onDelete}
+            className="p-2 hover:bg-red-50 rounded-lg transition-colors group"
+            title="Supprimer définitivement"
+          >
+            <Trash2 size={20} className="text-red-600 group-hover:text-red-700" />
+          </button>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-orange-600 hover:text-orange-700 font-semibold text-sm ml-2"
+          >
+            {expanded ? 'Réduire' : 'Développer'}
+          </button>
+        </div>
       </div>
 
       {/* Checkboxes de suivi */}
@@ -898,10 +978,11 @@ const AddEmailModal = ({ onClose, onAdd }) => {
               value={formData.langue}
               onChange={(e) => setFormData({ ...formData, langue: e.target.value })}
             >
-              <option value="FR">FR</option>
-              <option value="EN">EN</option>
-              <option value="ES">ES</option>
-              <option value="IT">IT</option>
+              <option value="FR">FR - Français</option>
+              <option value="EN">EN - Anglais</option>
+              <option value="DE">DE - Allemand</option>
+              <option value="ES">ES - Espagnol</option>
+              <option value="IT">IT - Italien</option>
             </select>
           </div>
           <div>
