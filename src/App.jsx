@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, Plus, Search, Calendar as CalendarIcon, Filter, AlertCircle, CheckCircle, Clock, TrendingUp, Download, X, Trash2, Archive, ArchiveRestore, Link as LinkIcon, ExternalLink, Image, Layout, Mail, Copy, Check, MessageSquare, FolderOpen } from 'lucide-react';
+import { Upload, Plus, Calendar as CalendarIcon, Filter, CheckCircle, TrendingUp, X, Trash2, Archive, ArchiveRestore, ExternalLink, Layout, Mail, Copy, Check, FolderOpen } from 'lucide-react';
 import { supabase, handleSupabaseError } from './supabaseClient';
 
 const EmailManagementTool = () => {
@@ -101,33 +101,18 @@ const EmailManagementTool = () => {
     reader.onload = async (event) => {
       try {
         const text = event.target.result;
-        const parseCSVLine = (line) => {
-          const result = [];
-          let current = '';
-          let inQuotes = false;
-          for (let i = 0; i < line.length; i++) {
-            const char = line[i];
-            const nextChar = line[i + 1];
-            if (char === '"') { if (inQuotes && nextChar === '"') { current += '"'; i++; } else { inQuotes = !inQuotes; } } 
-            else if (char === ',' && !inQuotes) { result.push(current.trim()); current = ''; } 
-            else { current += char; }
-          }
-          result.push(current.trim());
-          return result;
-        };
+        const parseCSVLine = (line) => { const result = []; let current = ''; let inQuotes = false; for (let i = 0; i < line.length; i++) { const char = line[i]; const nextChar = line[i + 1]; if (char === '"') { if (inQuotes && nextChar === '"') { current += '"'; i++; } else { inQuotes = !inQuotes; } } else if (char === ',' && !inQuotes) { result.push(current.trim()); current = ''; } else { current += char; } } result.push(current.trim()); return result; };
         const lines = text.split(/\r?\n/).filter(line => line.trim());
         if (lines.length < 2) { alert('❌ Fichier vide'); return; }
         const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase().replace(/\s+/g, '').replace(/[éèêë]/g, 'e').replace(/[àâä]/g, 'a'));
-        const hasDate = headers.some(h => h.includes('date') || h === 'dateenvoi');
-        if (!hasDate) { alert('❌ Colonne date manquante'); return; }
+        if (!headers.some(h => h.includes('date') || h === 'dateenvoi')) { alert('❌ Colonne date manquante'); return; }
         const activeEntityData = entities.find(e => e.name === activeEntity);
         if (!activeEntityData) return;
         const newOperations = [];
         for (let i = 1; i < lines.length; i++) {
           if (!lines[i].trim()) continue;
           const values = parseCSVLine(lines[i]);
-          const opObj = {};
-          headers.forEach((header, index) => { opObj[header] = values[index] || ''; });
+          const opObj = {}; headers.forEach((header, index) => { opObj[header] = values[index] || ''; });
           const dateValue = opObj.dateenvoi || opObj.date;
           if (dateValue && dateValue.trim()) {
             const baseOp = { entity_id: activeEntityData.id, type: operationType, date_envoi: dateValue.trim(), titre: opObj.titre || 'Sans titre', thematique: opObj.thematique || '', langue: opObj.langue || 'FR', brief: opObj.brief || '', produits: [] };
@@ -177,8 +162,7 @@ const EmailManagementTool = () => {
 
   const getFilteredOperations = () => {
     let filtered = [...operations];
-    if (!filters.archives) filtered = filtered.filter(e => !e.archived);
-    else filtered = filtered.filter(e => e.archived);
+    if (!filters.archives) filtered = filtered.filter(e => !e.archived); else filtered = filtered.filter(e => e.archived);
     if (filters.creaRealisee) filtered = filtered.filter(e => e.crea_realisee);
     if (filters.batValide) filtered = filtered.filter(e => e.bat_valide);
     if (filters.dansSRE) filtered = filtered.filter(e => e.dans_planning_sre);
@@ -200,7 +184,168 @@ const EmailManagementTool = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50">
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&display=swap');*{font-family:'Sora',sans-serif}.card-hover{transition:all .3s}.card-hover:hover{transform:translateY(-2px);box-shadow:0 20px 25px -5px rgba(251,146,60,.1)}.tab-active{background:linear-gradient(135deg,#f97316,#ea580c);color:#fff;box-shadow:0 10px 15px -3px rgba(249,115,22,.3)}.checkbox-custom{appearance:none;width:20px;height:20px;border:2px solid #fb923c;border-radius:4px;cursor:pointer;position:relative;transition:all .2s}.checkbox-custom:checked{background:linear-gradient(135deg,#f97316,#ea580c);border-color:#ea580c}.checkbox-custom:checked::after{content:'✓';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:14px;font-weight:700}.gradient-text{background:linear-gradient(135deg,#f97316,#ea580c);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}.btn-primary{background:linear-gradient(135deg,#f97316,#ea580c);color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600;transition:all .3s}.btn-primary:hover{transform:translateY(-2px);box-shadow:0 10px 15px -3px rgba(249,115,22,.4)}.btn-secondary{background:#fff;color:#f97316;border:2px solid #f97316;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:600;transition:all .3s}.btn-secondary:hover{background:#fff7ed}.sync-indicator{animation:sync-pulse 2s ease-in-out infinite}@keyframes sync-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(1.1)}}.type-selector{display:inline-flex;background:#fff;border-radius:8px;padding:4px;border:2px solid #fed7aa}.type-option{padding:8px 16px;border-radius:6px;cursor:pointer;transition:all .2s;font-weight:600;font-size:14px}.type-option:hover{background:#fff7ed}.type-option.active{background:linear-gradient(135deg,#f97316,#ea580c);color:#fff}`}</style>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&display=swap');
+        
+        * {
+          font-family: 'Sora', sans-serif;
+          box-sizing: border-box;
+        }
+        
+        body {
+          margin: 0;
+          padding: 0;
+        }
+        
+        .card-hover {
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .card-hover:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 20px 25px -5px rgba(251, 146, 60, 0.1), 0 10px 10px -5px rgba(251, 146, 60, 0.04);
+        }
+        
+        .tab-active {
+          background: linear-gradient(135deg, #f97316 0%, #ea580c 100%) !important;
+          color: white !important;
+          box-shadow: 0 10px 15px -3px rgba(249, 115, 22, 0.3);
+        }
+        
+        .checkbox-custom {
+          appearance: none;
+          -webkit-appearance: none;
+          width: 20px;
+          height: 20px;
+          border: 2px solid #fb923c;
+          border-radius: 4px;
+          cursor: pointer;
+          position: relative;
+          transition: all 0.2s;
+          flex-shrink: 0;
+        }
+        
+        .checkbox-custom:checked {
+          background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+          border-color: #ea580c;
+        }
+        
+        .checkbox-custom:checked::after {
+          content: '✓';
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          color: white;
+          font-size: 14px;
+          font-weight: bold;
+        }
+        
+        .gradient-text {
+          background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+        }
+        
+        .btn-primary {
+          background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+          color: white;
+          border: none;
+          padding: 10px 20px;
+          border-radius: 8px;
+          cursor: pointer;
+          font-weight: 600;
+          transition: all 0.3s;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+        }
+        
+        .btn-primary:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 10px 15px -3px rgba(249, 115, 22, 0.4);
+        }
+        
+        .btn-secondary {
+          background: white;
+          color: #f97316;
+          border: 2px solid #f97316;
+          padding: 10px 20px;
+          border-radius: 8px;
+          cursor: pointer;
+          font-weight: 600;
+          transition: all 0.3s;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+        }
+        
+        .btn-secondary:hover {
+          background: #fff7ed;
+        }
+        
+        .sync-indicator {
+          animation: sync-pulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes sync-pulse {
+          0%, 100% {
+            opacity: 1;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 0.5;
+            transform: scale(1.1);
+          }
+        }
+        
+        .type-selector {
+          display: inline-flex;
+          background: white;
+          border-radius: 8px;
+          padding: 4px;
+          border: 2px solid #fed7aa;
+        }
+        
+        .type-option {
+          padding: 8px 16px;
+          border-radius: 6px;
+          cursor: pointer;
+          transition: all 0.2s;
+          font-weight: 600;
+          font-size: 14px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: transparent;
+          border: none;
+        }
+        
+        .type-option:hover {
+          background: #fff7ed;
+        }
+        
+        .type-option.active {
+          background: linear-gradient(135deg, #f97316 0%, #ea580c 100%) !important;
+          color: white !important;
+        }
+        
+        .alert-badge {
+          animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        
+        @keyframes pulse {
+          0%, 100% {
+            opacity: 1;
+          }
+          50% {
+            opacity: 0.7;
+          }
+        }
+      `}</style>
 
       <div className="bg-white/80 backdrop-blur-lg border-b-2 border-orange-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 py-4">
@@ -213,8 +358,14 @@ const EmailManagementTool = () => {
               <p className="text-sm text-gray-600 mt-1">Templates • Campagnes • Calendrier • Temps réel</p>
             </div>
             <div className="flex gap-3">
-              <button onClick={() => setShowImportModal(true)} className="btn-secondary flex items-center gap-2"><Upload size={18} />Import CSV</button>
-              <button onClick={() => setShowAddModal(true)} className="btn-primary flex items-center gap-2"><Plus size={18} />Nouvelle opération</button>
+              <button onClick={() => setShowImportModal(true)} className="btn-secondary">
+                <Upload size={18} />
+                Import CSV
+              </button>
+              <button onClick={() => setShowAddModal(true)} className="btn-primary">
+                <Plus size={18} />
+                Nouvelle opération
+              </button>
             </div>
           </div>
         </div>
@@ -235,10 +386,10 @@ const EmailManagementTool = () => {
       <div className="max-w-7xl mx-auto px-6 py-6">
         {showCampaigns ? <CampaignsView entities={entities} /> : showCalendar ? <CalendarView entities={entities} /> : showAnalytics ? <AnalyticsView entities={entities} /> : (
           <>
-            <div className="mb-6 flex items-center justify-between">
+            <div className="mb-6 flex items-center justify-between flex-wrap gap-4">
               <div className="type-selector">
-                <button onClick={() => setOperationType('email')} className={`type-option flex items-center gap-2 ${operationType === 'email' ? 'active' : ''}`}><Mail size={16} />Emails</button>
-                <button onClick={() => setOperationType('slider')} className={`type-option flex items-center gap-2 ${operationType === 'slider' ? 'active' : ''}`}><Layout size={16} />Sliders</button>
+                <button onClick={() => setOperationType('email')} className={`type-option ${operationType === 'email' ? 'active' : ''}`}><Mail size={16} />Emails</button>
+                <button onClick={() => setOperationType('slider')} className={`type-option ${operationType === 'slider' ? 'active' : ''}`}><Layout size={16} />Sliders</button>
               </div>
               <div className="text-sm text-gray-600">{getFilteredOperations().length} {operationType === 'email' ? 'email(s)' : 'slider(s)'}</div>
             </div>
@@ -277,30 +428,20 @@ const FilterPanel = ({ filters, setFilters }) => (
 const OperationCard = ({ operation, onUpdate, onDelete, onArchive, onUnarchive, alert, messageTemplates, copyMessageToClipboard, copiedMessageId }) => {
   const [expanded, setExpanded] = useState(false);
   const [showProductModal, setShowProductModal] = useState(false);
-
   const hasTemplate = (triggerEvent) => messageTemplates && messageTemplates.some(t => t.trigger_event === triggerEvent);
-
-  const addProduct = async (product) => {
-    const updatedProducts = [...(operation.produits || []), product];
-    onUpdate({ produits: updatedProducts });
-    setShowProductModal(false);
-  };
-
-  const removeProduct = async (index) => {
-    const updatedProducts = (operation.produits || []).filter((_, i) => i !== index);
-    onUpdate({ produits: updatedProducts });
-  };
+  const addProduct = async (product) => { const updatedProducts = [...(operation.produits || []), product]; onUpdate({ produits: updatedProducts }); setShowProductModal(false); };
+  const removeProduct = async (index) => { const updatedProducts = (operation.produits || []).filter((_, i) => i !== index); onUpdate({ produits: updatedProducts }); };
 
   return (
     <div className="bg-white/90 backdrop-blur-lg rounded-2xl p-6 border-2 border-orange-200 card-hover">
       <div className="flex items-start justify-between mb-4">
         <div className="flex-1">
-          <div className="flex items-center gap-3 mb-2">
+          <div className="flex items-center gap-3 mb-2 flex-wrap">
             <h3 className="text-xl font-bold text-gray-800">{operation.type === 'email' ? '📧' : '🖼️'} {operation.titre}</h3>
             {alert.show && <span className="alert-badge bg-red-500 text-white text-xs px-3 py-1 rounded-full font-semibold">J-{alert.days}</span>}
             {operation.archived && <span className="bg-gray-400 text-white text-xs px-3 py-1 rounded-full">Archivé</span>}
           </div>
-          <div className="flex items-center gap-4 text-sm text-gray-600">
+          <div className="flex items-center gap-4 text-sm text-gray-600 flex-wrap">
             <span>📅 {new Date(operation.date_envoi).toLocaleDateString('fr-FR')}</span>
             {operation.thematique && <span>🏷️ {operation.thematique}</span>}
             <span>🌐 {operation.langue}</span>
@@ -314,41 +455,41 @@ const OperationCard = ({ operation, onUpdate, onDelete, onArchive, onUnarchive, 
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-2 cursor-pointer p-3 bg-orange-50 rounded-lg hover:bg-orange-100 transition-all flex-1">
             <input type="checkbox" className="checkbox-custom" checked={operation.crea_realisee} onChange={(e) => onUpdate({ crea_realisee: e.target.checked })} />
             <span className="text-sm font-medium">Créa réalisée</span>
           </label>
-          {operation.crea_realisee && hasTemplate('crea_realisee') && <button onClick={() => copyMessageToClipboard('crea_realisee', operation)} className="p-2 hover:bg-blue-50 rounded-lg transition-colors">{copiedMessageId === operation.id + 'crea_realisee' ? <Check size={18} className="text-green-600" /> : <Copy size={18} className="text-blue-600" />}</button>}
+          {operation.crea_realisee && hasTemplate('crea_realisee') && <button onClick={() => copyMessageToClipboard('crea_realisee', operation)} className="p-2 hover:bg-blue-50 rounded-lg transition-colors flex-shrink-0">{copiedMessageId === operation.id + 'crea_realisee' ? <Check size={18} className="text-green-600" /> : <Copy size={18} className="text-blue-600" />}</button>}
         </div>
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-2 cursor-pointer p-3 bg-orange-50 rounded-lg hover:bg-orange-100 transition-all flex-1">
             <input type="checkbox" className="checkbox-custom" checked={operation.bat_envoye_eric} onChange={(e) => onUpdate({ bat_envoye_eric: e.target.checked })} />
             <span className="text-sm font-medium">BAT → Eric</span>
           </label>
-          {operation.bat_envoye_eric && hasTemplate('bat_envoye_eric') && <button onClick={() => copyMessageToClipboard('bat_envoye_eric', operation)} className="p-2 hover:bg-blue-50 rounded-lg transition-colors">{copiedMessageId === operation.id + 'bat_envoye_eric' ? <Check size={18} className="text-green-600" /> : <Copy size={18} className="text-blue-600" />}</button>}
+          {operation.bat_envoye_eric && hasTemplate('bat_envoye_eric') && <button onClick={() => copyMessageToClipboard('bat_envoye_eric', operation)} className="p-2 hover:bg-blue-50 rounded-lg transition-colors flex-shrink-0">{copiedMessageId === operation.id + 'bat_envoye_eric' ? <Check size={18} className="text-green-600" /> : <Copy size={18} className="text-blue-600" />}</button>}
         </div>
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-2 cursor-pointer p-3 bg-orange-50 rounded-lg hover:bg-orange-100 transition-all flex-1">
             <input type="checkbox" className="checkbox-custom" checked={operation.bat_envoye_marketing} onChange={(e) => onUpdate({ bat_envoye_marketing: e.target.checked })} />
             <span className="text-sm font-medium">BAT → Marketing</span>
           </label>
-          {operation.bat_envoye_marketing && hasTemplate('bat_envoye_marketing') && <button onClick={() => copyMessageToClipboard('bat_envoye_marketing', operation)} className="p-2 hover:bg-blue-50 rounded-lg transition-colors">{copiedMessageId === operation.id + 'bat_envoye_marketing' ? <Check size={18} className="text-green-600" /> : <Copy size={18} className="text-blue-600" />}</button>}
+          {operation.bat_envoye_marketing && hasTemplate('bat_envoye_marketing') && <button onClick={() => copyMessageToClipboard('bat_envoye_marketing', operation)} className="p-2 hover:bg-blue-50 rounded-lg transition-colors flex-shrink-0">{copiedMessageId === operation.id + 'bat_envoye_marketing' ? <Check size={18} className="text-green-600" /> : <Copy size={18} className="text-blue-600" />}</button>}
         </div>
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-2 cursor-pointer p-3 bg-orange-50 rounded-lg hover:bg-orange-100 transition-all flex-1">
             <input type="checkbox" className="checkbox-custom" checked={operation.bat_valide} onChange={(e) => onUpdate({ bat_valide: e.target.checked })} />
             <span className="text-sm font-medium">BAT validé</span>
           </label>
-          {operation.bat_valide && hasTemplate('bat_valide') && <button onClick={() => copyMessageToClipboard('bat_valide', operation)} className="p-2 hover:bg-blue-50 rounded-lg transition-colors">{copiedMessageId === operation.id + 'bat_valide' ? <Check size={18} className="text-green-600" /> : <Copy size={18} className="text-blue-600" />}</button>}
+          {operation.bat_valide && hasTemplate('bat_valide') && <button onClick={() => copyMessageToClipboard('bat_valide', operation)} className="p-2 hover:bg-blue-50 rounded-lg transition-colors flex-shrink-0">{copiedMessageId === operation.id + 'bat_valide' ? <Check size={18} className="text-green-600" /> : <Copy size={18} className="text-blue-600" />}</button>}
         </div>
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-2 cursor-pointer p-3 bg-orange-50 rounded-lg hover:bg-orange-100 transition-all flex-1">
             <input type="checkbox" className="checkbox-custom" checked={operation.dans_planning_sre} onChange={(e) => onUpdate({ dans_planning_sre: e.target.checked })} />
             <span className="text-sm font-medium">Planning SRE</span>
           </label>
-          {operation.dans_planning_sre && hasTemplate('dans_planning_sre') && <button onClick={() => copyMessageToClipboard('dans_planning_sre', operation)} className="p-2 hover:bg-blue-50 rounded-lg transition-colors">{copiedMessageId === operation.id + 'dans_planning_sre' ? <Check size={18} className="text-green-600" /> : <Copy size={18} className="text-blue-600" />}</button>}
+          {operation.dans_planning_sre && hasTemplate('dans_planning_sre') && <button onClick={() => copyMessageToClipboard('dans_planning_sre', operation)} className="p-2 hover:bg-blue-50 rounded-lg transition-colors flex-shrink-0">{copiedMessageId === operation.id + 'dans_planning_sre' ? <Check size={18} className="text-green-600" /> : <Copy size={18} className="text-blue-600" />}</button>}
         </div>
       </div>
 
@@ -374,16 +515,16 @@ const OperationCard = ({ operation, onUpdate, onDelete, onArchive, onUnarchive, 
           <div>
             <div className="flex items-center justify-between mb-3">
               <label className="text-sm font-semibold text-gray-700">Produits</label>
-              <button onClick={() => setShowProductModal(true)} className="btn-primary text-sm flex items-center gap-2"><Plus size={16} />Ajouter produit</button>
+              <button onClick={() => setShowProductModal(true)} className="btn-primary text-sm"><Plus size={16} />Ajouter produit</button>
             </div>
             <div className="space-y-2">
               {(operation.produits || []).map((product, index) => (
                 <div key={index} className="flex items-center justify-between p-3 bg-purple-50 rounded-lg">
-                  <div className="flex-1">
-                    <div className="font-semibold text-gray-800">{product.libelle}</div>
-                    {product.url && <a href={product.url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline flex items-center gap-1"><ExternalLink size={14} />{product.url}</a>}
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-gray-800 truncate">{product.libelle}</div>
+                    {product.url && <a href={product.url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline flex items-center gap-1 truncate"><ExternalLink size={14} /><span className="truncate">{product.url}</span></a>}
                   </div>
-                  <button onClick={() => removeProduct(index)} className="p-1 hover:bg-red-100 rounded transition-colors"><X size={16} className="text-red-600" /></button>
+                  <button onClick={() => removeProduct(index)} className="p-1 hover:bg-red-100 rounded transition-colors flex-shrink-0 ml-2"><X size={16} className="text-red-600" /></button>
                 </div>
               ))}
             </div>
@@ -398,16 +539,10 @@ const OperationCard = ({ operation, onUpdate, onDelete, onArchive, onUnarchive, 
 const ProductModal = ({ onClose, onAdd }) => {
   const [libelle, setLibelle] = useState('');
   const [url, setUrl] = useState('');
-
-  const handleSubmit = () => {
-    if (!libelle.trim()) { alert('Libellé requis'); return; }
-    if (url && !url.startsWith('http://') && !url.startsWith('https://')) { alert('URL invalide'); return; }
-    onAdd({ libelle: libelle.trim(), url: url.trim() });
-  };
-
+  const handleSubmit = () => { if (!libelle.trim()) { alert('Libellé requis'); return; } if (url && !url.startsWith('http://') && !url.startsWith('https://')) { alert('URL invalide'); return; } onAdd({ libelle: libelle.trim(), url: url.trim() }); };
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-2xl p-8 max-w-md w-full m-4" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl p-8 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-2xl font-bold gradient-text mb-6">Ajouter un produit</h2>
         <div className="space-y-4">
           <div><label className="block text-sm font-semibold text-gray-700 mb-2">Libellé *</label><input type="text" value={libelle} onChange={(e) => setLibelle(e.target.value)} className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:border-orange-500 focus:outline-none" placeholder="Ex: Nike Air Max" /></div>
@@ -424,15 +559,10 @@ const ProductModal = ({ onClose, onAdd }) => {
 
 const AddOperationModal = ({ operationType, onClose, onAdd }) => {
   const [formData, setFormData] = useState({ dateEnvoi: '', titre: '', thematique: '', langue: 'FR', brief: '', position_slider: 'homepage' });
-
-  const handleSubmit = () => {
-    if (!formData.dateEnvoi || !formData.titre) { alert('Date et titre requis'); return; }
-    onAdd(formData);
-  };
-
+  const handleSubmit = () => { if (!formData.dateEnvoi || !formData.titre) { alert('Date et titre requis'); return; } onAdd(formData); };
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-2xl p-8 max-w-md w-full m-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl p-8 max-w-md w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-2xl font-bold gradient-text mb-6">Nouvelle opération</h2>
         <div className="space-y-4">
           <div><label className="block text-sm font-semibold text-gray-700 mb-2">Date d'envoi *</label><input type="date" value={formData.dateEnvoi} onChange={(e) => setFormData({ ...formData, dateEnvoi: e.target.value })} className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:border-orange-500 focus:outline-none" /></div>
@@ -452,17 +582,15 @@ const AddOperationModal = ({ operationType, onClose, onAdd }) => {
 };
 
 const ImportCSVModal = ({ onClose, onImport }) => (
-  <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-    <div className="bg-white rounded-2xl p-8 max-w-md w-full m-4" onClick={(e) => e.stopPropagation()}>
+  <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+    <div className="bg-white rounded-2xl p-8 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
       <h2 className="text-2xl font-bold gradient-text mb-6">Importer CSV</h2>
       <div className="space-y-4">
         <p className="text-sm text-gray-600">Colonnes requises : dateenvoi, titre</p>
         <p className="text-sm text-gray-600">Colonnes optionnelles : thematique, langue, brief</p>
         <input type="file" accept=".csv" onChange={onImport} className="w-full px-4 py-2 border-2 border-orange-200 rounded-lg focus:border-orange-500 focus:outline-none" />
       </div>
-      <div className="flex gap-3 mt-6">
-        <button onClick={onClose} className="btn-secondary flex-1">Fermer</button>
-      </div>
+      <button onClick={onClose} className="btn-secondary w-full mt-6">Fermer</button>
     </div>
   </div>
 );
@@ -471,23 +599,9 @@ const CampaignsView = ({ entities }) => {
   const [campaigns, setCampaigns] = useState([]);
   const [selectedCampaign, setSelectedCampaign] = useState(null);
   const [loading, setLoading] = useState(true);
-
   useEffect(() => { loadCampaigns(); }, [entities]);
-
-  const loadCampaigns = async () => {
-    setLoading(true);
-    const { data, error } = await supabase.from('campaigns').select('*, entities(name), operations(*)').order('date_debut', { ascending: false });
-    if (!handleSupabaseError(error)) setCampaigns(data || []);
-    setLoading(false);
-  };
-
-  const getCampaignStats = (campaign) => {
-    const ops = campaign.operations || [];
-    const total = ops.length;
-    const validated = ops.filter(op => op.bat_valide).length;
-    const percentage = total > 0 ? Math.round((validated / total) * 100) : 0;
-    return { total, validated, percentage };
-  };
+  const loadCampaigns = async () => { setLoading(true); const { data, error } = await supabase.from('campaigns').select('*, entities(name), operations(*)').order('date_debut', { ascending: false }); if (!handleSupabaseError(error)) setCampaigns(data || []); setLoading(false); };
+  const getCampaignStats = (campaign) => { const ops = campaign.operations || []; const total = ops.length; const validated = ops.filter(op => op.bat_valide).length; const percentage = total > 0 ? Math.round((validated / total) * 100) : 0; return { total, validated, percentage }; };
 
   if (selectedCampaign) {
     return (
@@ -496,7 +610,7 @@ const CampaignsView = ({ entities }) => {
           <button onClick={() => setSelectedCampaign(null)} className="btn-secondary mb-4">← Retour</button>
           <h2 className="text-3xl font-bold gradient-text mb-4">📂 {selectedCampaign.name}</h2>
           {selectedCampaign.description && <p className="text-gray-600 mb-4">{selectedCampaign.description}</p>}
-          <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             <div className="bg-orange-50 p-4 rounded-lg"><div className="text-2xl font-bold text-orange-600">{selectedCampaign.operations.length}</div><div className="text-sm text-gray-600">Opérations</div></div>
             <div className="bg-blue-50 p-4 rounded-lg"><div className="text-2xl font-bold text-blue-600">{selectedCampaign.operations.filter(o => o.type === 'email').length}</div><div className="text-sm text-gray-600">Emails</div></div>
             <div className="bg-purple-50 p-4 rounded-lg"><div className="text-2xl font-bold text-purple-600">{selectedCampaign.operations.filter(o => o.type === 'slider').length}</div><div className="text-sm text-gray-600">Sliders</div></div>
@@ -506,7 +620,7 @@ const CampaignsView = ({ entities }) => {
             <h3 className="text-lg font-bold text-gray-800">Timeline</h3>
             {selectedCampaign.operations.sort((a, b) => new Date(a.date_envoi) - new Date(b.date_envoi)).map(op => (
               <div key={op.id} className="bg-gray-50 p-4 rounded-lg border-2 border-gray-200">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-3">
                     <span className="text-2xl">{op.type === 'email' ? '📧' : '🖼️'}</span>
                     <div><div className="font-semibold">{op.titre}</div><div className="text-sm text-gray-600">{new Date(op.date_envoi).toLocaleDateString('fr-FR')} • {op.langue}</div></div>
@@ -535,12 +649,12 @@ const CampaignsView = ({ entities }) => {
               const stats = getCampaignStats(campaign);
               return (
                 <div key={campaign.id} onClick={() => setSelectedCampaign(campaign)} className="p-6 bg-gradient-to-r from-orange-50 to-rose-50 rounded-xl border-2 border-orange-200 hover:border-orange-400 cursor-pointer transition-all card-hover">
-                  <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-start justify-between mb-4 flex-wrap gap-4">
                     <div><h3 className="text-xl font-bold text-gray-800 mb-2">{campaign.name}</h3><div className="text-sm text-gray-600">{campaign.entities?.name} • {stats.total} opération(s)</div></div>
                     <div className="text-right"><div className="text-2xl font-bold text-orange-600">{stats.percentage}%</div><div className="text-xs text-gray-600">{stats.validated}/{stats.total} validées</div></div>
                   </div>
                   <div className="w-full bg-gray-200 rounded-full h-3 mb-3"><div className="bg-gradient-to-r from-orange-500 to-rose-500 h-3 rounded-full transition-all" style={{ width: `${stats.percentage}%` }}></div></div>
-                  <div className="flex items-center gap-4 text-sm text-gray-600"><span>📅 {new Date(campaign.date_debut).toLocaleDateString('fr-FR')}</span><span>→</span><span>{new Date(campaign.date_fin).toLocaleDateString('fr-FR')}</span></div>
+                  <div className="flex items-center gap-4 text-sm text-gray-600 flex-wrap"><span>📅 {new Date(campaign.date_debut).toLocaleDateString('fr-FR')}</span><span>→</span><span>{new Date(campaign.date_fin).toLocaleDateString('fr-FR')}</span></div>
                 </div>
               );
             })}
@@ -555,48 +669,23 @@ const CalendarView = ({ entities }) => {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [allOperations, setAllOperations] = useState([]);
   const [loading, setLoading] = useState(true);
-
   useEffect(() => { loadAllOperations(); }, [currentMonth]);
-
-  const loadAllOperations = async () => {
-    setLoading(true);
-    const startOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
-    const endOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
-    const { data, error } = await supabase.from('operations').select('*, entities(name)').gte('date_envoi', startOfMonth.toISOString().split('T')[0]).lte('date_envoi', endOfMonth.toISOString().split('T')[0]).order('date_envoi');
-    if (!handleSupabaseError(error)) setAllOperations(data || []);
-    setLoading(false);
-  };
-
-  const getDaysInMonth = () => {
-    const year = currentMonth.getFullYear();
-    const month = currentMonth.getMonth();
-    const firstDay = new Date(year, month, 1).getDay();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const days = [];
-    for (let i = 0; i < (firstDay === 0 ? 6 : firstDay - 1); i++) days.push(null);
-    for (let i = 1; i <= daysInMonth; i++) days.push(i);
-    return days;
-  };
-
-  const getOperationsForDay = (day) => {
-    if (!day) return [];
-    const dateStr = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    return allOperations.filter(op => op.date_envoi === dateStr);
-  };
-
+  const loadAllOperations = async () => { setLoading(true); const startOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1); const endOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0); const { data, error } = await supabase.from('operations').select('*, entities(name)').gte('date_envoi', startOfMonth.toISOString().split('T')[0]).lte('date_envoi', endOfMonth.toISOString().split('T')[0]).order('date_envoi'); if (!handleSupabaseError(error)) setAllOperations(data || []); setLoading(false); };
+  const getDaysInMonth = () => { const year = currentMonth.getFullYear(); const month = currentMonth.getMonth(); const firstDay = new Date(year, month, 1).getDay(); const daysInMonth = new Date(year, month + 1, 0).getDate(); const days = []; for (let i = 0; i < (firstDay === 0 ? 6 : firstDay - 1); i++) days.push(null); for (let i = 1; i <= daysInMonth; i++) days.push(i); return days; };
+  const getOperationsForDay = (day) => { if (!day) return []; const dateStr = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`; return allOperations.filter(op => op.date_envoi === dateStr); };
   const monthNames = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 
   return (
     <div className="space-y-6">
       <div className="bg-white/90 rounded-2xl p-6 border-2 border-orange-200">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-4">
           <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1))} className="btn-secondary">← Précédent</button>
           <h2 className="text-2xl font-bold gradient-text">{monthNames[currentMonth.getMonth()]} {currentMonth.getFullYear()}</h2>
           <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1))} className="btn-secondary">Suivant →</button>
         </div>
       </div>
-      <div className="bg-white/90 rounded-2xl p-6 border-2 border-orange-200">
-        <div className="grid grid-cols-7 gap-2">
+      <div className="bg-white/90 rounded-2xl p-4 md:p-6 border-2 border-orange-200 overflow-x-auto">
+        <div className="grid grid-cols-7 gap-2 min-w-[640px]">
           {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map(day => <div key={day} className="text-center font-bold text-gray-700 py-2">{day}</div>)}
           {getDaysInMonth().map((day, index) => {
             const ops = getOperationsForDay(day);
@@ -623,7 +712,7 @@ const CalendarView = ({ entities }) => {
         </div>
       </div>
       <div className="bg-white/90 rounded-2xl p-4 border-2 border-orange-200">
-        <div className="flex items-center gap-6 text-sm">
+        <div className="flex items-center gap-6 text-sm flex-wrap">
           <div className="flex items-center gap-2"><div className="w-4 h-4 bg-blue-100 rounded"></div><span>📧 Emails</span></div>
           <div className="flex items-center gap-2"><div className="w-4 h-4 bg-purple-100 rounded"></div><span>🖼️ Sliders</span></div>
         </div>
@@ -635,25 +724,8 @@ const CalendarView = ({ entities }) => {
 const AnalyticsView = ({ entities }) => {
   const [stats, setStats] = useState({ total: 0, emails: 0, sliders: 0, validated: 0, inSRE: 0, campaigns: 0 });
   const [loading, setLoading] = useState(true);
-
   useEffect(() => { loadStats(); }, [entities]);
-
-  const loadStats = async () => {
-    setLoading(true);
-    const { data: operations, error: opsError } = await supabase.from('operations').select('*');
-    const { data: campaigns, error: campsError } = await supabase.from('campaigns').select('*');
-    if (!handleSupabaseError(opsError) && !handleSupabaseError(campsError)) {
-      setStats({
-        total: operations.length,
-        emails: operations.filter(o => o.type === 'email').length,
-        sliders: operations.filter(o => o.type === 'slider').length,
-        validated: operations.filter(o => o.bat_valide).length,
-        inSRE: operations.filter(o => o.dans_planning_sre).length,
-        campaigns: campaigns.length
-      });
-    }
-    setLoading(false);
-  };
+  const loadStats = async () => { setLoading(true); const { data: operations, error: opsError } = await supabase.from('operations').select('*'); const { data: campaigns, error: campsError } = await supabase.from('campaigns').select('*'); if (!handleSupabaseError(opsError) && !handleSupabaseError(campsError)) { setStats({ total: operations.length, emails: operations.filter(o => o.type === 'email').length, sliders: operations.filter(o => o.type === 'slider').length, validated: operations.filter(o => o.bat_valide).length, inSRE: operations.filter(o => o.dans_planning_sre).length, campaigns: campaigns.length }); } setLoading(false); };
 
   return (
     <div className="space-y-6">
@@ -673,154 +745,5 @@ const AnalyticsView = ({ entities }) => {
     </div>
   );
 };
-<style>{`
-  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&display=swap');
-  
-  * {
-    font-family: 'Sora', sans-serif;
-  }
-  
-  .card-hover {
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  
-  .card-hover:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 20px 25px -5px rgba(251, 146, 60, 0.1), 0 10px 10px -5px rgba(251, 146, 60, 0.04);
-  }
-  
-  .tab-active {
-    background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
-    color: white;
-    box-shadow: 0 10px 15px -3px rgba(249, 115, 22, 0.3);
-  }
-  
-  .checkbox-custom {
-    appearance: none;
-    width: 20px;
-    height: 20px;
-    border: 2px solid #fb923c;
-    border-radius: 4px;
-    cursor: pointer;
-    position: relative;
-    transition: all 0.2s;
-  }
-  
-  .checkbox-custom:checked {
-    background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
-    border-color: #ea580c;
-  }
-  
-  .checkbox-custom:checked::after {
-    content: '✓';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    color: white;
-    font-size: 14px;
-    font-weight: bold;
-  }
-  
-  .gradient-text {
-    background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-  
-  .btn-primary {
-    background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
-    color: white;
-    border: none;
-    padding: 10px 20px;
-    border-radius: 8px;
-    cursor: pointer;
-    font-weight: 600;
-    transition: all 0.3s;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-  }
-  
-  .btn-primary:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 10px 15px -3px rgba(249, 115, 22, 0.4);
-  }
-  
-  .btn-secondary {
-    background: white;
-    color: #f97316;
-    border: 2px solid #f97316;
-    padding: 10px 20px;
-    border-radius: 8px;
-    cursor: pointer;
-    font-weight: 600;
-    transition: all 0.3s;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-  }
-  
-  .btn-secondary:hover {
-    background: #fff7ed;
-  }
-  
-  .sync-indicator {
-    animation: sync-pulse 2s ease-in-out infinite;
-  }
-  
-  @keyframes sync-pulse {
-    0%, 100% {
-      opacity: 1;
-      transform: scale(1);
-    }
-    50% {
-      opacity: 0.5;
-      transform: scale(1.1);
-    }
-  }
-  
-  .type-selector {
-    display: inline-flex;
-    background: white;
-    border-radius: 8px;
-    padding: 4px;
-    border: 2px solid #fed7aa;
-  }
-  
-  .type-option {
-    padding: 8px 16px;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.2s;
-    font-weight: 600;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  
-  .type-option:hover {
-    background: #fff7ed;
-  }
-  
-  .type-option.active {
-    background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
-    color: white;
-  }
-  
-  .alert-badge {
-    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  }
-  
-  @keyframes pulse {
-    0%, 100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.7;
-    }
-  }
-`}</style>
+
 export default EmailManagementTool;
