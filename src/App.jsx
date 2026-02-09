@@ -1,34 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, Plus, Search, Calendar, Filter, AlertCircle, CheckCircle, Clock, TrendingUp, Download, X, Trash2, Archive, ArchiveRestore } from 'lucide-react';
-
-// Simulated Supabase storage (will be replaced with actual Supabase in production)
-const useLocalStorage = (key, initialValue) => {
-  const [storedValue, setStoredValue] = useState(() => {
-    try {
-      const item = window.localStorage.getItem(key);
-      return item ? JSON.parse(item) : initialValue;
-    } catch (error) {
-      return initialValue;
-    }
-  });
-
-  const setValue = (value) => {
-    try {
-      setStoredValue(value);
-      window.localStorage.setItem(key, JSON.stringify(value));
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
-  return [storedValue, setValue];
-};
+import { Upload, Plus, Search, Calendar, Filter, AlertCircle, CheckCircle, Clock, TrendingUp, Download, X, Trash2, Archive, ArchiveRestore, Link as LinkIcon, ExternalLink } from 'lucide-react';
+import { supabase, handleSupabaseError } from './supabaseClient';
 
 const EmailManagementTool = () => {
   // États principaux
   const [activeEntity, setActiveEntity] = useState('J4C');
-  const [entities, setEntities] = useLocalStorage('entities', ['J4C', 'Narbonne Accessoires', 'CTCARR', 'Accessoires Outdoor']);
-  const [emails, setEmails] = useLocalStorage('emails', {});
+  const [entities, setEntities] = useState([]);
+  const [emails, setEmails] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
@@ -44,46 +23,107 @@ const EmailManagementTool = () => {
     dateFin: ''
   });
 
-  // Initialiser les emails pour chaque entité
-  useEffect(() => {
-    const newEmails = { ...emails };
-    entities.forEach(entity => {
-      if (!newEmails[entity]) {
-        newEmails[entity] = [];
+  // Charger les entités
+  const loadEntities = async () => {
+    const { data, error } = await supabase
+      .from('entities')
+      .select('*')
+      .order('name');
+    
+    if (!handleSupabaseError(error)) {
+      setEntities(data || []);
+      if (data && data.length > 0 && !activeEntity) {
+        setActiveEntity(data[0].name);
       }
-    });
-    setEmails(newEmails);
-  }, [entities]);
+    }
+  };
+
+  // Charger les emails pour l'entité active
+  const loadEmails = async () => {
+    if (!activeEntity) return;
+    
+    setLoading(true);
+    const activeEntityData = entities.find(e => e.name === activeEntity);
+    if (!activeEntityData) return;
+
+    const { data, error } = await supabase
+      .from('emails')
+      .select('*')
+      .eq('entity_id', activeEntityData.id)
+      .order('date_envoi', { ascending: true });
+    
+    if (!handleSupabaseError(error)) {
+      setEmails(data || []);
+    }
+    setLoading(false);
+  };
+
+  // Souscrire aux changements en temps réel
+  useEffect(() => {
+    loadEntities();
+  }, []);
+
+  useEffect(() => {
+    if (entities.length > 0) {
+      loadEmails();
+    }
+  }, [activeEntity, entities]);
+
+  // Écouter les changements en temps réel
+  useEffect(() => {
+    const activeEntityData = entities.find(e => e.name === activeEntity);
+    if (!activeEntityData) return;
+
+    const subscription = supabase
+      .channel('emails-changes')
+      .on('postgres_changes', 
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'emails',
+          filter: `entity_id=eq.${activeEntityData.id}`
+        }, 
+        () => {
+          loadEmails();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [activeEntity, entities]);
 
   // Fonction pour ajouter un email
-  const addEmail = (emailData) => {
-    const newEmail = {
-      id: Date.now().toString(),
-      dateEnvoi: emailData.dateEnvoi,
-      titre: emailData.titre,
-      thematique: emailData.thematique,
-      langue: emailData.langue || 'FR',
-      brief: emailData.brief || '',
-      objet: '',
-      preheader: '',
-      corps: '',
-      produits: [],
-      creaRealisee: false,
-      batEnvoyeEric: false,
-      batEnvoyeMarketing: false,
-      batValide: false,
-      dateValidationBAT: '',
-      dansPlanningsSRE: false,
-      dateAjoutSRE: '',
-      archived: false,
-      archivedAt: '',
-      createdAt: new Date().toISOString()
-    };
+  const addEmail = async (emailData) => {
+    const activeEntityData = entities.find(e => e.name === activeEntity);
+    if (!activeEntityData) return;
 
-    const updatedEmails = { ...emails };
-    updatedEmails[activeEntity] = [...(updatedEmails[activeEntity] || []), newEmail];
-    setEmails(updatedEmails);
-    setShowAddModal(false);
+    const { error } = await supabase
+      .from('emails')
+      .insert([{
+        entity_id: activeEntityData.id,
+        date_envoi: emailData.dateEnvoi,
+        titre: emailData.titre,
+        thematique: emailData.thematique,
+        langue: emailData.langue || 'FR',
+        brief: emailData.brief || '',
+        objet: '',
+        preheader: '',
+        corps: '',
+        produits: [],
+        crea_realisee: false,
+        bat_envoye_eric: false,
+        bat_envoye_marketing: false,
+        bat_valide: false,
+        dans_planning_sre: false,
+        archived: false
+      }]);
+
+    if (!handleSupabaseError(error)) {
+      setShowAddModal(false);
+      loadEmails();
+    }
   };
 
   // Import CSV avec parsing amélioré
@@ -92,11 +132,10 @@ const EmailManagementTool = () => {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const text = event.target.result;
         
-        // Parser CSV en gérant les guillemets et virgules dans les valeurs
         const parseCSVLine = (line) => {
           const result = [];
           let current = '';
@@ -109,7 +148,7 @@ const EmailManagementTool = () => {
             if (char === '"') {
               if (inQuotes && nextChar === '"') {
                 current += '"';
-                i++; // Skip next quote
+                i++;
               } else {
                 inQuotes = !inQuotes;
               }
@@ -124,92 +163,139 @@ const EmailManagementTool = () => {
           return result;
         };
 
-        // Séparer les lignes en gérant différents types de retours à la ligne
         const lines = text.split(/\r?\n/).filter(line => line.trim());
         
         if (lines.length < 2) {
-          alert('❌ Le fichier CSV est vide ou invalide. Il doit contenir au moins une ligne d\'en-têtes et une ligne de données.');
+          alert('❌ Le fichier CSV est vide ou invalide.');
           return;
         }
 
-        // Parser les en-têtes
         const headers = parseCSVLine(lines[0]).map(h => 
           h.toLowerCase()
             .replace(/\s+/g, '')
             .replace(/[éèêë]/g, 'e')
             .replace(/[àâä]/g, 'a')
         );
-        
-        console.log('En-têtes détectés:', headers);
 
-        // Vérifier que les colonnes essentielles existent
         const hasDate = headers.some(h => h.includes('date') || h === 'dateenvoi');
-        const hasTitle = headers.some(h => h.includes('titre') || h.includes('title'));
-        
         if (!hasDate) {
           alert('❌ Colonne "date" ou "dateenvoi" manquante dans le CSV.');
           return;
         }
 
+        const activeEntityData = entities.find(e => e.name === activeEntity);
+        if (!activeEntityData) return;
+
         const newEmails = [];
         let importedCount = 0;
-        let skippedCount = 0;
 
-        // Parser chaque ligne
         for (let i = 1; i < lines.length; i++) {
           if (!lines[i].trim()) continue;
           
           const values = parseCSVLine(lines[i]);
           const emailObj = {};
           
-          // Mapper les valeurs aux en-têtes
           headers.forEach((header, index) => {
             emailObj[header] = values[index] || '';
           });
 
-          // Trouver la date (supporter différents noms de colonnes)
           const dateValue = emailObj.dateenvoi || emailObj.date || emailObj.dateenvoie || 
                            emailObj.datedenvoi || emailObj.senddate;
 
           if (dateValue && dateValue.trim()) {
             newEmails.push({
-              dateEnvoi: dateValue.trim(),
+              entity_id: activeEntityData.id,
+              date_envoi: dateValue.trim(),
               titre: emailObj.titre || emailObj.title || emailObj.nom || 'Sans titre',
               thematique: emailObj.thematique || emailObj.theme || emailObj.type || '',
               langue: emailObj.langue || emailObj.language || emailObj.lang || 'FR',
-              brief: emailObj.brief || emailObj.description || emailObj.message || ''
+              brief: emailObj.brief || emailObj.description || emailObj.message || '',
+              produits: []
             });
             importedCount++;
-          } else {
-            console.warn(`Ligne ${i + 1} ignorée (pas de date):`, values);
-            skippedCount++;
           }
         }
 
         if (newEmails.length === 0) {
-          alert('❌ Aucun email valide trouvé dans le CSV.\n\nVérifiez que :\n- Il y a une colonne "dateenvoi" ou "date"\n- Les lignes contiennent des dates valides');
+          alert('❌ Aucun email valide trouvé dans le CSV.');
           return;
         }
 
-        // Ajouter tous les emails
-        newEmails.forEach(email => addEmail(email));
-        
-        // Message de confirmation
-        alert(`✅ Import réussi !\n\n${importedCount} email(s) importé(s)${skippedCount > 0 ? `\n${skippedCount} ligne(s) ignorée(s) (pas de date)` : ''}`);
-        
-        setShowImportModal(false);
+        const { error } = await supabase
+          .from('emails')
+          .insert(newEmails);
+
+        if (!handleSupabaseError(error)) {
+          alert(`✅ Import réussi !\n\n${importedCount} email(s) importé(s)`);
+          setShowImportModal(false);
+          loadEmails();
+        }
         
       } catch (error) {
         console.error('Erreur lors de l\'import CSV:', error);
-        alert('❌ Erreur lors de l\'import du CSV.\n\n' + error.message + '\n\nVérifiez le format de votre fichier.');
+        alert('❌ Erreur lors de l\'import du CSV.\n\n' + error.message);
       }
     };
     
-    reader.onerror = () => {
-      alert('❌ Erreur lors de la lecture du fichier.');
-    };
-    
     reader.readAsText(file, 'UTF-8');
+  };
+
+  // Mettre à jour un email
+  const updateEmail = async (emailId, updates) => {
+    const { error } = await supabase
+      .from('emails')
+      .update(updates)
+      .eq('id', emailId);
+
+    if (!handleSupabaseError(error)) {
+      loadEmails();
+    }
+  };
+
+  // Supprimer un email
+  const deleteEmail = async (emailId) => {
+    if (window.confirm('⚠️ Êtes-vous sûr de vouloir supprimer cet email ?\n\nCette action est irréversible.')) {
+      const { error } = await supabase
+        .from('emails')
+        .delete()
+        .eq('id', emailId);
+
+      if (!handleSupabaseError(error)) {
+        loadEmails();
+      }
+    }
+  };
+
+  // Archiver un email
+  const archiveEmail = async (emailId) => {
+    if (window.confirm('📦 Archiver cet email ?')) {
+      const { error } = await supabase
+        .from('emails')
+        .update({ 
+          archived: true, 
+          archived_at: new Date().toISOString() 
+        })
+        .eq('id', emailId);
+
+      if (!handleSupabaseError(error)) {
+        loadEmails();
+      }
+    }
+  };
+
+  // Désarchiver un email
+  const unarchiveEmail = async (emailId) => {
+    const { error } = await supabase
+      .from('emails')
+      .update({ 
+        archived: false, 
+        archived_at: null 
+      })
+      .eq('id', emailId);
+
+    if (!handleSupabaseError(error)) {
+      loadEmails();
+    }
   };
 
   // Calculer les alertes
@@ -227,77 +313,54 @@ const EmailManagementTool = () => {
 
   // Filtrer les emails
   const getFilteredEmails = () => {
-    let filtered = emails[activeEntity] || [];
+    let filtered = [...emails];
 
-    // Par défaut, ne pas afficher les emails archivés sauf si le filtre est activé
     if (!filters.archives) {
       filtered = filtered.filter(e => !e.archived);
     } else {
-      // Si le filtre archives est activé, montrer SEULEMENT les archivés
       filtered = filtered.filter(e => e.archived);
     }
 
     if (filters.creaRealisee) {
-      filtered = filtered.filter(e => e.creaRealisee);
+      filtered = filtered.filter(e => e.crea_realisee);
     }
     if (filters.batValide) {
-      filtered = filtered.filter(e => e.batValide);
+      filtered = filtered.filter(e => e.bat_valide);
     }
     if (filters.dansSRE) {
-      filtered = filtered.filter(e => e.dansPlanningsSRE);
+      filtered = filtered.filter(e => e.dans_planning_sre);
     }
     if (filters.pasDansSRE) {
-      filtered = filtered.filter(e => !e.dansPlanningsSRE);
+      filtered = filtered.filter(e => !e.dans_planning_sre);
     }
     if (filters.thematique) {
-      filtered = filtered.filter(e => e.thematique.toLowerCase().includes(filters.thematique.toLowerCase()));
+      filtered = filtered.filter(e => e.thematique?.toLowerCase().includes(filters.thematique.toLowerCase()));
     }
     if (filters.langue) {
       filtered = filtered.filter(e => e.langue === filters.langue);
     }
     if (filters.dateDebut) {
-      filtered = filtered.filter(e => new Date(e.dateEnvoi) >= new Date(filters.dateDebut));
+      filtered = filtered.filter(e => new Date(e.date_envoi) >= new Date(filters.dateDebut));
     }
     if (filters.dateFin) {
-      filtered = filtered.filter(e => new Date(e.dateEnvoi) <= new Date(filters.dateFin));
+      filtered = filtered.filter(e => new Date(e.date_envoi) <= new Date(filters.dateFin));
     }
 
-    // Tri par date d'envoi
-    return filtered.sort((a, b) => new Date(a.dateEnvoi) - new Date(b.dateEnvoi));
+    return filtered.sort((a, b) => new Date(a.date_envoi) - new Date(b.date_envoi));
   };
 
-  // Mettre à jour un email
-  const updateEmail = (emailId, updates) => {
-    const updatedEmails = { ...emails };
-    const emailIndex = updatedEmails[activeEntity].findIndex(e => e.id === emailId);
-    if (emailIndex !== -1) {
-      updatedEmails[activeEntity][emailIndex] = {
-        ...updatedEmails[activeEntity][emailIndex],
-        ...updates
-      };
-      setEmails(updatedEmails);
+  // Ajouter une nouvelle entité
+  const addEntity = async () => {
+    const newEntity = prompt('Nom de la nouvelle entité :');
+    if (newEntity && !entities.find(e => e.name === newEntity)) {
+      const { error } = await supabase
+        .from('entities')
+        .insert([{ name: newEntity }]);
+      
+      if (!handleSupabaseError(error)) {
+        loadEntities();
+      }
     }
-  };
-
-  // Supprimer un email
-  const deleteEmail = (emailId) => {
-    if (window.confirm('⚠️ Êtes-vous sûr de vouloir supprimer cet email ?\n\nCette action est irréversible.')) {
-      const updatedEmails = { ...emails };
-      updatedEmails[activeEntity] = updatedEmails[activeEntity].filter(e => e.id !== emailId);
-      setEmails(updatedEmails);
-    }
-  };
-
-  // Archiver un email
-  const archiveEmail = (emailId) => {
-    if (window.confirm('📦 Archiver cet email ?\n\nL\'email sera marqué comme archivé et pourra être filtré.')) {
-      updateEmail(emailId, { archived: true, archivedAt: new Date().toISOString() });
-    }
-  };
-
-  // Désarchiver un email
-  const unarchiveEmail = (emailId) => {
-    updateEmail(emailId, { archived: false, archivedAt: '' });
   };
 
   return (
@@ -405,6 +468,21 @@ const EmailManagementTool = () => {
         .btn-secondary:hover {
           background: #fff7ed;
         }
+
+        .sync-indicator {
+          animation: sync-pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes sync-pulse {
+          0%, 100% {
+            opacity: 1;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 0.5;
+            transform: scale(1.1);
+          }
+        }
       `}</style>
 
       {/* Header */}
@@ -412,8 +490,11 @@ const EmailManagementTool = () => {
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold gradient-text">Email Campaign Manager</h1>
-              <p className="text-sm text-gray-600 mt-1 mono">Gestion centralisée des campagnes marketing</p>
+              <div className="flex items-center gap-3">
+                <h1 className="text-3xl font-bold gradient-text">Email Campaign Manager</h1>
+                <span className="sync-indicator bg-green-500 w-3 h-3 rounded-full" title="Synchronisé en temps réel"></span>
+              </div>
+              <p className="text-sm text-gray-600 mt-1 mono">Gestion centralisée • Synchronisation temps réel</p>
             </div>
             <div className="flex gap-3">
               <button
@@ -440,18 +521,18 @@ const EmailManagementTool = () => {
         <div className="flex gap-2 overflow-x-auto pb-2">
           {entities.map(entity => (
             <button
-              key={entity}
+              key={entity.id}
               onClick={() => {
-                setActiveEntity(entity);
+                setActiveEntity(entity.name);
                 setShowAnalytics(false);
               }}
               className={`px-6 py-3 rounded-lg font-semibold whitespace-nowrap transition-all ${
-                activeEntity === entity && !showAnalytics
+                activeEntity === entity.name && !showAnalytics
                   ? 'tab-active'
                   : 'bg-white hover:bg-orange-50 text-gray-700'
               }`}
             >
-              {entity}
+              {entity.name}
             </button>
           ))}
           <button
@@ -466,12 +547,7 @@ const EmailManagementTool = () => {
             Analytics
           </button>
           <button
-            onClick={() => {
-              const newEntity = prompt('Nom de la nouvelle entité :');
-              if (newEntity && !entities.includes(newEntity)) {
-                setEntities([...entities, newEntity]);
-              }
-            }}
+            onClick={addEntity}
             className="px-4 py-3 rounded-lg bg-orange-100 hover:bg-orange-200 text-orange-700 font-semibold"
           >
             <Plus size={18} />
@@ -587,7 +663,13 @@ const EmailManagementTool = () => {
 
             {/* Liste des emails */}
             <div className="space-y-4">
-              {getFilteredEmails().length === 0 ? (
+              {loading ? (
+                <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-12 text-center border-2 border-orange-200">
+                  <div className="text-6xl mb-4">⏳</div>
+                  <h3 className="text-xl font-bold text-gray-700 mb-2">Chargement...</h3>
+                  <p className="text-gray-600">Récupération des données</p>
+                </div>
+              ) : getFilteredEmails().length === 0 ? (
                 <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-12 text-center border-2 border-orange-200">
                   <div className="text-6xl mb-4">📧</div>
                   <h3 className="text-xl font-bold text-gray-700 mb-2">Aucun email pour le moment</h3>
@@ -602,14 +684,14 @@ const EmailManagementTool = () => {
                     onDelete={() => deleteEmail(email.id)}
                     onArchive={() => archiveEmail(email.id)}
                     onUnarchive={() => unarchiveEmail(email.id)}
-                    alert={getAlertStatus(email.dateEnvoi)}
+                    alert={getAlertStatus(email.date_envoi)}
                   />
                 ))
               )}
             </div>
           </>
         ) : (
-          <AnalyticsView emails={emails} entities={entities} />
+          <AnalyticsView entities={entities} />
         )}
       </div>
 
@@ -623,86 +705,33 @@ const EmailManagementTool = () => {
 
       {/* Modal Import CSV */}
       {showImportModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-8 max-w-3xl w-full border-4 border-orange-300 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold gradient-text">Importer un fichier CSV</h2>
-              <button onClick={() => setShowImportModal(false)} className="text-gray-500 hover:text-gray-700">
-                <X size={24} />
-              </button>
-            </div>
-            
-            <div className="mb-6 space-y-4">
-              <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
-                <h3 className="font-bold text-blue-900 mb-2">📋 Format attendu</h3>
-                <p className="text-sm text-blue-800 mb-2">
-                  Votre CSV doit contenir ces colonnes (l'ordre n'a pas d'importance) :
-                </p>
-                <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
-                  <li><strong>dateenvoi</strong> ou <strong>date</strong> (obligatoire) - Format : YYYY-MM-DD ou DD/MM/YYYY</li>
-                  <li><strong>titre</strong> ou <strong>title</strong> (recommandé) - Le nom de votre campagne</li>
-                  <li><strong>thematique</strong> ou <strong>theme</strong> (optionnel) - Ex: Nouveauté, Promotion, etc.</li>
-                  <li><strong>langue</strong> ou <strong>lang</strong> (optionnel) - Ex: FR, EN, ES, IT</li>
-                  <li><strong>brief</strong> ou <strong>description</strong> (optionnel) - Description de la campagne</li>
-                </ul>
-              </div>
-
-              <div className="bg-orange-50 border-2 border-orange-200 rounded-lg p-4">
-                <h3 className="font-bold text-orange-900 mb-2">✅ Exemple valide</h3>
-                <pre className="text-xs mono bg-white p-3 rounded border border-orange-200 overflow-x-auto">
-{`dateenvoi,titre,thematique,langue,brief
-2024-03-15,Nouvelle collection printemps,Nouveauté,FR,Découvrez nos nouveautés
-2024-03-20,Vente Flash 48h,Promotion,FR,50% sur tout le site
-2024-03-25,Black Friday Preview,Promotion,EN,Early access deals`}
-                </pre>
-              </div>
-
-              <div className="bg-green-50 border-2 border-green-200 rounded-lg p-4">
-                <h3 className="font-bold text-green-900 mb-2">💡 Astuces</h3>
-                <ul className="text-sm text-green-800 space-y-1 list-disc list-inside">
-                  <li>Vous pouvez exporter depuis Excel en choisissant "CSV UTF-8"</li>
-                  <li>Les noms de colonnes ne sont pas sensibles aux accents ou à la casse</li>
-                  <li>Les lignes sans date seront automatiquement ignorées</li>
-                  <li>Si le titre est vide, il sera remplacé par "Sans titre"</li>
-                </ul>
-              </div>
-
-              <div className="border-2 border-dashed border-orange-300 rounded-lg p-6 text-center hover:border-orange-500 transition-all">
-                <input
-                  type="file"
-                  accept=".csv"
-                  onChange={handleCSVImport}
-                  className="hidden"
-                  id="csv-upload"
-                />
-                <label 
-                  htmlFor="csv-upload"
-                  className="cursor-pointer flex flex-col items-center gap-3"
-                >
-                  <Upload size={48} className="text-orange-500" />
-                  <div>
-                    <p className="font-bold text-gray-800">Cliquez pour choisir un fichier CSV</p>
-                    <p className="text-sm text-gray-600">ou glissez-déposez ici</p>
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            <div className="flex gap-3">
-              <button onClick={() => setShowImportModal(false)} className="btn-secondary flex-1">
-                Annuler
-              </button>
-            </div>
-          </div>
-        </div>
+        <ImportCSVModal
+          onClose={() => setShowImportModal(false)}
+          onImport={handleCSVImport}
+        />
       )}
     </div>
   );
 };
 
-// Composant Card Email
+// Composant Card Email avec gestion avancée des produits
 const EmailCard = ({ email, onUpdate, onDelete, onArchive, onUnarchive, alert }) => {
   const [expanded, setExpanded] = useState(false);
+  const [showProductModal, setShowProductModal] = useState(false);
+
+  // Parse produits (JSONB from Supabase)
+  const produits = Array.isArray(email.produits) ? email.produits : [];
+
+  const addProduct = (produit) => {
+    const updatedProduits = [...produits, produit];
+    onUpdate({ produits: updatedProduits });
+    setShowProductModal(false);
+  };
+
+  const removeProduct = (index) => {
+    const updatedProduits = produits.filter((_, i) => i !== index);
+    onUpdate({ produits: updatedProduits });
+  };
 
   return (
     <div className={`bg-white/90 backdrop-blur-lg rounded-2xl p-6 border-2 card-hover ${
@@ -710,7 +739,7 @@ const EmailCard = ({ email, onUpdate, onDelete, onArchive, onUnarchive, alert })
     }`}>
       <div className="flex items-start justify-between mb-4">
         <div className="flex-1">
-          <div className="flex items-center gap-3 mb-2">
+          <div className="flex items-center gap-3 mb-2 flex-wrap">
             <h3 className="text-xl font-bold text-gray-800">{email.titre}</h3>
             {email.archived && (
               <span className="bg-gray-200 text-gray-700 text-xs px-3 py-1 rounded-full font-semibold flex items-center gap-1">
@@ -724,25 +753,27 @@ const EmailCard = ({ email, onUpdate, onDelete, onArchive, onUnarchive, alert })
                 J-{alert.days}
               </span>
             )}
-            {!email.archived && !email.dansPlanningsSRE && (
+            {!email.archived && !email.dans_planning_sre && (
               <span className="bg-yellow-100 text-yellow-700 text-xs px-3 py-1 rounded-full font-semibold">
                 À ajouter au planning SRE
               </span>
             )}
-            {!email.archived && email.batValide && !email.dateValidationBAT && (
+            {!email.archived && email.bat_valide && !email.date_validation_bat && (
               <span className="bg-blue-100 text-blue-700 text-xs px-3 py-1 rounded-full font-semibold">
                 À mettre dans le planning SRE – BAT validé
               </span>
             )}
           </div>
-          <div className="flex items-center gap-4 text-sm text-gray-600">
+          <div className="flex items-center gap-4 text-sm text-gray-600 flex-wrap">
             <span className="flex items-center gap-1 mono">
               <Calendar size={14} />
-              {new Date(email.dateEnvoi).toLocaleDateString('fr-FR')}
+              {new Date(email.date_envoi).toLocaleDateString('fr-FR')}
             </span>
-            <span className="bg-orange-100 text-orange-700 px-2 py-1 rounded text-xs font-semibold">
-              {email.thematique}
-            </span>
+            {email.thematique && (
+              <span className="bg-orange-100 text-orange-700 px-2 py-1 rounded text-xs font-semibold">
+                {email.thematique}
+              </span>
+            )}
             <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-xs font-semibold mono">
               {email.langue}
             </span>
@@ -788,8 +819,8 @@ const EmailCard = ({ email, onUpdate, onDelete, onArchive, onUnarchive, alert })
           <input
             type="checkbox"
             className="checkbox-custom"
-            checked={email.creaRealisee}
-            onChange={(e) => onUpdate({ creaRealisee: e.target.checked })}
+            checked={email.crea_realisee}
+            onChange={(e) => onUpdate({ crea_realisee: e.target.checked })}
           />
           <span className="text-sm font-medium">Créa réalisée</span>
         </label>
@@ -797,8 +828,8 @@ const EmailCard = ({ email, onUpdate, onDelete, onArchive, onUnarchive, alert })
           <input
             type="checkbox"
             className="checkbox-custom"
-            checked={email.batEnvoyeEric}
-            onChange={(e) => onUpdate({ batEnvoyeEric: e.target.checked })}
+            checked={email.bat_envoye_eric}
+            onChange={(e) => onUpdate({ bat_envoye_eric: e.target.checked })}
           />
           <span className="text-sm font-medium">BAT → Eric</span>
         </label>
@@ -806,8 +837,8 @@ const EmailCard = ({ email, onUpdate, onDelete, onArchive, onUnarchive, alert })
           <input
             type="checkbox"
             className="checkbox-custom"
-            checked={email.batEnvoyeMarketing}
-            onChange={(e) => onUpdate({ batEnvoyeMarketing: e.target.checked })}
+            checked={email.bat_envoye_marketing}
+            onChange={(e) => onUpdate({ bat_envoye_marketing: e.target.checked })}
           />
           <span className="text-sm font-medium">BAT → Marketing</span>
         </label>
@@ -815,8 +846,8 @@ const EmailCard = ({ email, onUpdate, onDelete, onArchive, onUnarchive, alert })
           <input
             type="checkbox"
             className="checkbox-custom"
-            checked={email.batValide}
-            onChange={(e) => onUpdate({ batValide: e.target.checked })}
+            checked={email.bat_valide}
+            onChange={(e) => onUpdate({ bat_valide: e.target.checked })}
           />
           <span className="text-sm font-medium">BAT validé</span>
         </label>
@@ -824,10 +855,10 @@ const EmailCard = ({ email, onUpdate, onDelete, onArchive, onUnarchive, alert })
           <input
             type="checkbox"
             className="checkbox-custom"
-            checked={email.dansPlanningsSRE}
+            checked={email.dans_planning_sre}
             onChange={(e) => onUpdate({
-              dansPlanningsSRE: e.target.checked,
-              dateAjoutSRE: e.target.checked ? new Date().toISOString() : ''
+              dans_planning_sre: e.target.checked,
+              date_ajout_sre: e.target.checked ? new Date().toISOString() : null
             })}
           />
           <span className="text-sm font-medium">Dans planning SRE</span>
@@ -835,7 +866,7 @@ const EmailCard = ({ email, onUpdate, onDelete, onArchive, onUnarchive, alert })
       </div>
 
       {/* Date de validation BAT */}
-      {email.batValide && (
+      {email.bat_valide && (
         <div className="mb-4 p-4 bg-blue-50 rounded-lg">
           <label className="block text-sm font-semibold text-gray-700 mb-2">
             Date de validation totale du BAT
@@ -843,21 +874,21 @@ const EmailCard = ({ email, onUpdate, onDelete, onArchive, onUnarchive, alert })
           <input
             type="date"
             className="w-full px-4 py-2 border-2 border-blue-200 rounded-lg focus:border-blue-500 focus:outline-none"
-            value={email.dateValidationBAT}
-            onChange={(e) => onUpdate({ dateValidationBAT: e.target.value })}
+            value={email.date_validation_bat || ''}
+            onChange={(e) => onUpdate({ date_validation_bat: e.target.value })}
           />
         </div>
       )}
 
       {/* Contenu détaillé (développable) */}
       {expanded && (
-        <div className="mt-6 pt-6 border-t-2 border-orange-200 space-y-4 animate-in fade-in duration-300">
+        <div className="mt-6 pt-6 border-t-2 border-orange-200 space-y-4">
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-2">Brief</label>
             <textarea
               className="w-full px-4 py-3 border-2 border-orange-200 rounded-lg focus:border-orange-500 focus:outline-none"
               rows={2}
-              value={email.brief}
+              value={email.brief || ''}
               onChange={(e) => onUpdate({ brief: e.target.value })}
               placeholder="Description du brief..."
             />
@@ -867,7 +898,7 @@ const EmailCard = ({ email, onUpdate, onDelete, onArchive, onUnarchive, alert })
             <input
               type="text"
               className="w-full px-4 py-3 border-2 border-orange-200 rounded-lg focus:border-orange-500 focus:outline-none"
-              value={email.objet}
+              value={email.objet || ''}
               onChange={(e) => onUpdate({ objet: e.target.value })}
               placeholder="Objet de l'email..."
             />
@@ -877,7 +908,7 @@ const EmailCard = ({ email, onUpdate, onDelete, onArchive, onUnarchive, alert })
             <input
               type="text"
               className="w-full px-4 py-3 border-2 border-orange-200 rounded-lg focus:border-orange-500 focus:outline-none"
-              value={email.preheader}
+              value={email.preheader || ''}
               onChange={(e) => onUpdate({ preheader: e.target.value })}
               placeholder="Pre-header..."
             />
@@ -887,23 +918,142 @@ const EmailCard = ({ email, onUpdate, onDelete, onArchive, onUnarchive, alert })
             <textarea
               className="w-full px-4 py-3 border-2 border-orange-200 rounded-lg focus:border-orange-500 focus:outline-none"
               rows={4}
-              value={email.corps}
+              value={email.corps || ''}
               onChange={(e) => onUpdate({ corps: e.target.value })}
               placeholder="Contenu de l'email..."
             />
           </div>
+          
+          {/* Gestion des produits avec libellés et URLs */}
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">Produits à intégrer</label>
-            <input
-              type="text"
-              className="w-full px-4 py-3 border-2 border-orange-200 rounded-lg focus:border-orange-500 focus:outline-none"
-              value={email.produits.join(', ')}
-              onChange={(e) => onUpdate({ produits: e.target.value.split(',').map(p => p.trim()) })}
-              placeholder="Produit1, Produit2, Produit3..."
-            />
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-semibold text-gray-700">
+                Produits à intégrer
+              </label>
+              <button
+                onClick={() => setShowProductModal(true)}
+                className="btn-primary text-sm flex items-center gap-1 px-3 py-1"
+              >
+                <Plus size={16} />
+                Ajouter produit
+              </button>
+            </div>
+            
+            {produits.length === 0 ? (
+              <div className="p-4 bg-gray-50 rounded-lg text-center text-sm text-gray-600">
+                Aucun produit ajouté. Cliquez sur "Ajouter produit" pour commencer.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {produits.map((produit, index) => (
+                  <div 
+                    key={index}
+                    className="flex items-center gap-3 p-3 bg-purple-50 rounded-lg border-2 border-purple-200"
+                  >
+                    <div className="flex-1">
+                      <div className="font-semibold text-gray-800">{produit.libelle}</div>
+                      {produit.url && (
+                        <a 
+                          href={produit.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1 mt-1"
+                        >
+                          <LinkIcon size={12} />
+                          {produit.url}
+                          <ExternalLink size={12} />
+                        </a>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => removeProduct(index)}
+                      className="p-2 hover:bg-red-100 rounded-lg transition-colors"
+                      title="Retirer ce produit"
+                    >
+                      <X size={16} className="text-red-600" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
+
+      {/* Modal Ajout Produit */}
+      {showProductModal && (
+        <ProductModal
+          onClose={() => setShowProductModal(false)}
+          onAdd={addProduct}
+        />
+      )}
+    </div>
+  );
+};
+
+// Modal pour ajouter un produit
+const ProductModal = ({ onClose, onAdd }) => {
+  const [formData, setFormData] = useState({
+    libelle: '',
+    url: ''
+  });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (formData.libelle.trim()) {
+      onAdd(formData);
+      setFormData({ libelle: '', url: '' });
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl p-6 max-w-lg w-full border-4 border-purple-300">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-bold text-gray-800">Ajouter un produit</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+            <X size={24} />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Libellé du produit <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              className="w-full px-4 py-3 border-2 border-purple-200 rounded-lg focus:border-purple-500 focus:outline-none"
+              value={formData.libelle}
+              onChange={(e) => setFormData({ ...formData, libelle: e.target.value })}
+              placeholder="Ex: Chaussures running Nike Air"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              URL du produit (optionnel)
+            </label>
+            <input
+              type="url"
+              className="w-full px-4 py-3 border-2 border-purple-200 rounded-lg focus:border-purple-500 focus:outline-none"
+              value={formData.url}
+              onChange={(e) => setFormData({ ...formData, url: e.target.value })}
+              placeholder="https://example.com/produit"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              L'URL doit commencer par http:// ou https://
+            </p>
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={onClose} className="btn-secondary flex-1">
+              Annuler
+            </button>
+            <button type="submit" className="btn-primary flex-1">
+              Ajouter
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 };
@@ -1014,46 +1164,111 @@ const AddEmailModal = ({ onClose, onAdd }) => {
   );
 };
 
-// Vue Analytics
-const AnalyticsView = ({ emails, entities }) => {
+// Modal Import CSV
+const ImportCSVModal = ({ onClose, onImport }) => {
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl p-8 max-w-3xl w-full border-4 border-orange-300 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold gradient-text">Importer un fichier CSV</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+            <X size={24} />
+          </button>
+        </div>
+        
+        <div className="mb-6 space-y-4">
+          <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
+            <h3 className="font-bold text-blue-900 mb-2">📋 Format attendu</h3>
+            <p className="text-sm text-blue-800 mb-2">
+              Votre CSV doit contenir ces colonnes :
+            </p>
+            <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+              <li><strong>dateenvoi</strong> (obligatoire) - Format : YYYY-MM-DD</li>
+              <li><strong>titre</strong> (recommandé)</li>
+              <li><strong>thematique, langue, brief</strong> (optionnels)</li>
+            </ul>
+          </div>
+
+          <div className="border-2 border-dashed border-orange-300 rounded-lg p-6 text-center hover:border-orange-500 transition-all">
+            <input
+              type="file"
+              accept=".csv"
+              onChange={onImport}
+              className="hidden"
+              id="csv-upload"
+            />
+            <label 
+              htmlFor="csv-upload"
+              className="cursor-pointer flex flex-col items-center gap-3"
+            >
+              <Upload size={48} className="text-orange-500" />
+              <div>
+                <p className="font-bold text-gray-800">Cliquez pour choisir un fichier CSV</p>
+                <p className="text-sm text-gray-600">ou glissez-déposez ici</p>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <button onClick={onClose} className="btn-secondary flex-1">
+            Annuler
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Vue Analytics (simplifée pour Supabase)
+const AnalyticsView = ({ entities }) => {
+  const [allEmails, setAllEmails] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [dateDebut, setDateDebut] = useState('');
   const [dateFin, setDateFin] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
 
-  const getAllEmails = () => {
-    let allEmails = [];
-    entities.forEach(entity => {
-      if (emails[entity]) {
-        allEmails = [...allEmails, ...emails[entity].map(e => ({ ...e, entity }))];
-      }
-    });
-    return allEmails;
+  useEffect(() => {
+    loadAllEmails();
+  }, [entities]);
+
+  const loadAllEmails = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('emails')
+      .select('*, entities(name)')
+      .order('date_envoi', { ascending: false });
+    
+    if (!handleSupabaseError(error)) {
+      setAllEmails(data || []);
+    }
+    setLoading(false);
   };
 
   const getFilteredEmails = () => {
-    let filtered = getAllEmails();
+    let filtered = [...allEmails];
 
     if (dateDebut) {
-      filtered = filtered.filter(e => new Date(e.dateEnvoi) >= new Date(dateDebut));
+      filtered = filtered.filter(e => new Date(e.date_envoi) >= new Date(dateDebut));
     }
     if (dateFin) {
-      filtered = filtered.filter(e => new Date(e.dateEnvoi) <= new Date(dateFin));
+      filtered = filtered.filter(e => new Date(e.date_envoi) <= new Date(dateFin));
     }
     if (searchTerm) {
       filtered = filtered.filter(e =>
-        e.titre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        e.thematique.toLowerCase().includes(searchTerm.toLowerCase())
+        e.titre?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        e.thematique?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
-    return filtered.sort((a, b) => new Date(b.dateEnvoi) - new Date(a.dateEnvoi));
+    return filtered;
   };
 
   const stats = {
-    total: getAllEmails().length,
-    envoyes: getAllEmails().filter(e => new Date(e.dateEnvoi) < new Date()).length,
-    aVenir: getAllEmails().filter(e => new Date(e.dateEnvoi) >= new Date()).length,
-    batValides: getAllEmails().filter(e => e.batValide).length
+    total: allEmails.length,
+    envoyes: allEmails.filter(e => new Date(e.date_envoi) < new Date()).length,
+    aVenir: allEmails.filter(e => new Date(e.date_envoi) >= new Date()).length,
+    batValides: allEmails.filter(e => e.bat_valide).length
   };
 
   return (
@@ -1114,34 +1329,42 @@ const AnalyticsView = ({ emails, entities }) => {
         <h3 className="text-lg font-bold text-gray-800 mb-4">
           Emails trouvés ({getFilteredEmails().length})
         </h3>
-        <div className="space-y-3">
-          {getFilteredEmails().map((email) => (
-            <div
-              key={email.id}
-              className="p-4 bg-orange-50 rounded-lg hover:bg-orange-100 transition-all"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-bold text-gray-800">{email.titre}</h4>
-                  <div className="flex items-center gap-3 text-sm text-gray-600 mt-1">
-                    <span className="mono">{new Date(email.dateEnvoi).toLocaleDateString('fr-FR')}</span>
-                    <span className="bg-orange-200 px-2 py-1 rounded text-xs font-semibold">
-                      {email.thematique}
-                    </span>
-                    <span className="bg-purple-200 px-2 py-1 rounded text-xs font-semibold">
-                      {email.entity}
-                    </span>
+        {loading ? (
+          <div className="text-center py-8 text-gray-600">Chargement...</div>
+        ) : (
+          <div className="space-y-3">
+            {getFilteredEmails().map((email) => (
+              <div
+                key={email.id}
+                className="p-4 bg-orange-50 rounded-lg hover:bg-orange-100 transition-all"
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-bold text-gray-800">{email.titre}</h4>
+                    <div className="flex items-center gap-3 text-sm text-gray-600 mt-1 flex-wrap">
+                      <span className="mono">{new Date(email.date_envoi).toLocaleDateString('fr-FR')}</span>
+                      {email.thematique && (
+                        <span className="bg-orange-200 px-2 py-1 rounded text-xs font-semibold">
+                          {email.thematique}
+                        </span>
+                      )}
+                      {email.entities && (
+                        <span className="bg-purple-200 px-2 py-1 rounded text-xs font-semibold">
+                          {email.entities.name}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {email.crea_realisee && <CheckCircle size={16} className="text-green-600" />}
+                    {email.bat_valide && <CheckCircle size={16} className="text-blue-600" />}
+                    {email.dans_planning_sre && <CheckCircle size={16} className="text-purple-600" />}
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {email.creaRealisee && <CheckCircle size={16} className="text-green-600" />}
-                  {email.batValide && <CheckCircle size={16} className="text-blue-600" />}
-                  {email.dansPlanningsSRE && <CheckCircle size={16} className="text-purple-600" />}
-                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
