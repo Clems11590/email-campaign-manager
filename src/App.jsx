@@ -1,9 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, Plus, Search, Calendar, Filter, AlertCircle, CheckCircle, Clock, TrendingUp, Download, X, Trash2, Archive, ArchiveRestore, Link as LinkIcon, ExternalLink } from 'lucide-react';
 import { supabase, handleSupabaseError } from './supabaseClient';
+import { Copy, Check, MessageSquare, FolderOpen } from 'lucide-react';
 
 const EmailManagementTool = () => {
   // États principaux
+  const [messageTemplates, setMessageTemplates] = useState([]);
+  const [showCampaigns, setShowCampaigns] = useState(false);
+  const [copiedMessageId, setCopiedMessageId] = useState(null);
   const [activeEntity, setActiveEntity] = useState('J4C');
   const [entities, setEntities] = useState([]);
   const [emails, setEmails] = useState([]);
@@ -93,6 +97,173 @@ const EmailManagementTool = () => {
       subscription.unsubscribe();
     };
   }, [activeEntity, entities]);
+
+  // Charger les templates de messages
+const loadMessageTemplates = async () => {
+  const activeEntityData = entities.find(e => e.name === activeEntity);
+  if (!activeEntityData) return;
+
+  const { data, error } = await supabase
+    .from('message_templates')
+    .select('*')
+    .eq('entity_id', activeEntityData.id)
+    .eq('is_active', true);
+  
+  if (!handleSupabaseError(error)) {
+    setMessageTemplates(data || []);
+  }
+};
+
+// Appeler dans useEffect
+useEffect(() => {
+  if (entities.length > 0) {
+    loadOperations();
+    loadMessageTemplates(); // ← NOUVEAU
+  }
+}, [activeEntity, entities]);
+
+  const generateMessage = (template, operation) => {
+  if (!template || !operation) return '';
+  
+  // Formater la date
+  const dateFormatted = new Date(operation.date_envoi).toLocaleDateString('fr-FR');
+  
+  // Map des variables
+  const variables = {
+    '{{titre}}': operation.titre || '',
+    '{{date_envoi}}': dateFormatted,
+    '{{type}}': operation.type === 'email' ? 'Email' : 'Slider',
+    '{{thematique}}': operation.thematique || '',
+    '{{langue}}': operation.langue || '',
+    '{{entity}}': activeEntity,
+    '{{brief}}': operation.brief || ''
+  };
+  
+  // Remplacer dans le sujet
+  let subject = template.subject || '';
+  Object.keys(variables).forEach(key => {
+    subject = subject.replace(new RegExp(key, 'g'), variables[key]);
+  });
+  
+  // Remplacer dans le corps
+  let body = template.body || '';
+  Object.keys(variables).forEach(key => {
+    body = body.replace(new RegExp(key, 'g'), variables[key]);
+  });
+  
+  // Retourner le message complet
+  return subject ? `Sujet : ${subject}\n\n${body}` : body;
+};
+
+const copyMessageToClipboard = async (triggerEvent, operation) => {
+  // Trouver le template correspondant
+  const template = messageTemplates.find(t => t.trigger_event === triggerEvent);
+  if (!template) {
+    alert('❌ Aucun template configuré pour cette action');
+    return;
+  }
+  
+  // Générer le message
+  const message = generateMessage(template, operation);
+  
+  // Copier dans le presse-papier
+  try {
+    await navigator.clipboard.writeText(message);
+    
+    // Sauvegarder dans l'historique
+    await supabase
+      .from('sent_messages')
+      .insert([{
+        operation_id: operation.id,
+        template_id: template.id,
+        subject: template.subject,
+        body: message
+      }]);
+    
+    // Feedback visuel
+    setCopiedMessageId(operation.id + triggerEvent);
+    setTimeout(() => setCopiedMessageId(null), 2000);
+    
+  } catch (error) {
+    alert('❌ Erreur lors de la copie : ' + error.message);
+  }
+};
+
+  const OperationCard = ({ operation, onUpdate, ... }) => {
+  const [expanded, setExpanded] = useState(false);
+
+  // Fonction pour afficher le bouton si template disponible
+  const hasTemplate = (triggerEvent) => {
+    return messageTemplates.some(t => t.trigger_event === triggerEvent);
+  };
+
+  return (
+    <div className="...">
+      {/* ... header ... */}
+      
+      {/* Checkboxes avec boutons template */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+        
+        {/* Créa réalisée */}
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-2 cursor-pointer p-3 bg-orange-50 rounded-lg hover:bg-orange-100 transition-all flex-1">
+            <input
+              type="checkbox"
+              className="checkbox-custom"
+              checked={operation.crea_realisee}
+              onChange={(e) => onUpdate({ crea_realisee: e.target.checked })}
+            />
+            <span className="text-sm font-medium">Créa réalisée</span>
+          </label>
+          {operation.crea_realisee && hasTemplate('crea_realisee') && (
+            <button
+              onClick={() => copyMessageToClipboard('crea_realisee', operation)}
+              className="p-2 hover:bg-blue-50 rounded-lg transition-colors"
+              title="Copier le message"
+            >
+              {copiedMessageId === operation.id + 'crea_realisee' ? (
+                <Check size={18} className="text-green-600" />
+              ) : (
+                <Copy size={18} className="text-blue-600" />
+              )}
+            </button>
+          )}
+        </div>
+
+        {/* BAT envoyé Eric */}
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-2 cursor-pointer p-3 bg-orange-50 rounded-lg hover:bg-orange-100 transition-all flex-1">
+            <input
+              type="checkbox"
+              className="checkbox-custom"
+              checked={operation.bat_envoye_eric}
+              onChange={(e) => onUpdate({ bat_envoye_eric: e.target.checked })}
+            />
+            <span className="text-sm font-medium">BAT → Eric</span>
+          </label>
+          {operation.bat_envoye_eric && hasTemplate('bat_envoye_eric') && (
+            <button
+              onClick={() => copyMessageToClipboard('bat_envoye_eric', operation)}
+              className="p-2 hover:bg-blue-50 rounded-lg transition-colors"
+              title="Copier le message"
+            >
+              {copiedMessageId === operation.id + 'bat_envoye_eric' ? (
+                <Check size={18} className="text-green-600" />
+              ) : (
+                <Copy size={18} className="text-blue-600" />
+              )}
+            </button>
+          )}
+        </div>
+
+        {/* Répétez pour les autres checkboxes */}
+        
+      </div>
+      
+      {/* ... reste du composant ... */}
+    </div>
+  );
+};
 
   // Fonction pour ajouter un email
   const addEmail = async (emailData) => {
@@ -484,6 +655,21 @@ const EmailManagementTool = () => {
           }
         }
       `}</style>
+
+      {/* Dans les tabs */}
+<button
+  onClick={() => {
+    setShowCampaigns(true);
+    setShowAnalytics(false);
+    setShowCalendar(false);
+  }}
+  className={`px-6 py-3 rounded-lg font-semibold whitespace-nowrap transition-all flex items-center gap-2 ${
+    showCampaigns ? 'tab-active' : 'bg-white hover:bg-orange-50 text-gray-700'
+  }`}
+>
+  <FolderOpen size={18} />
+  Campagnes
+</button>
 
       {/* Header */}
       <div className="bg-white/80 backdrop-blur-lg border-b-2 border-orange-200 sticky top-0 z-50">
@@ -1363,6 +1549,185 @@ const AnalyticsView = ({ entities }) => {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const CampaignsView = ({ entities }) => {
+  const [campaigns, setCampaigns] = useState([]);
+  const [selectedCampaign, setSelectedCampaign] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadCampaigns();
+  }, [entities]);
+
+  const loadCampaigns = async () => {
+    setLoading(true);
+    
+    const { data, error } = await supabase
+      .from('campaigns')
+      .select(`
+        *,
+        entities(name),
+        operations(*)
+      `)
+      .order('date_debut', { ascending: false });
+    
+    if (!handleSupabaseError(error)) {
+      setCampaigns(data || []);
+    }
+    setLoading(false);
+  };
+
+  const getCampaignStats = (campaign) => {
+    const ops = campaign.operations || [];
+    const total = ops.length;
+    const validated = ops.filter(op => op.bat_valide).length;
+    const percentage = total > 0 ? Math.round((validated / total) * 100) : 0;
+    
+    return { total, validated, percentage };
+  };
+
+  if (selectedCampaign) {
+    return (
+      <div className="space-y-6">
+        {/* Détail campagne */}
+        <div className="bg-white/90 backdrop-blur-lg rounded-2xl p-6 border-2 border-orange-200">
+          <button
+            onClick={() => setSelectedCampaign(null)}
+            className="btn-secondary mb-4 flex items-center gap-2"
+          >
+            ← Retour aux campagnes
+          </button>
+          
+          <h2 className="text-3xl font-bold gradient-text mb-4">
+            📂 {selectedCampaign.name}
+          </h2>
+          
+          {selectedCampaign.description && (
+            <p className="text-gray-600 mb-4">{selectedCampaign.description}</p>
+          )}
+          
+          <div className="grid grid-cols-3 gap-4 mb-6">
+            <div className="bg-orange-50 p-4 rounded-lg">
+              <div className="text-2xl font-bold text-orange-600">
+                {selectedCampaign.operations.length}
+              </div>
+              <div className="text-sm text-gray-600">Opérations</div>
+            </div>
+            <div className="bg-blue-50 p-4 rounded-lg">
+              <div className="text-2xl font-bold text-blue-600">
+                {selectedCampaign.operations.filter(o => o.type === 'email').length}
+              </div>
+              <div className="text-sm text-gray-600">Emails</div>
+            </div>
+            <div className="bg-purple-50 p-4 rounded-lg">
+              <div className="text-2xl font-bold text-purple-600">
+                {selectedCampaign.operations.filter(o => o.type === 'slider').length}
+              </div>
+              <div className="text-sm text-gray-600">Sliders</div>
+            </div>
+          </div>
+          
+          <div className="text-sm text-gray-600 mb-6">
+            📅 Du {new Date(selectedCampaign.date_debut).toLocaleDateString('fr-FR')} 
+            au {new Date(selectedCampaign.date_fin).toLocaleDateString('fr-FR')}
+          </div>
+          
+          {/* Timeline des opérations */}
+          <div className="space-y-3">
+            <h3 className="text-lg font-bold text-gray-800">Timeline</h3>
+            {selectedCampaign.operations
+              .sort((a, b) => new Date(a.date_envoi) - new Date(b.date_envoi))
+              .map(op => (
+                <div key={op.id} className="bg-gray-50 p-4 rounded-lg border-2 border-gray-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl">
+                        {op.type === 'email' ? '📧' : '🖼️'}
+                      </span>
+                      <div>
+                        <div className="font-semibold">{op.titre}</div>
+                        <div className="text-sm text-gray-600">
+                          {new Date(op.date_envoi).toLocaleDateString('fr-FR')} • {op.langue}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {op.crea_realisee && <CheckCircle size={16} className="text-green-600" />}
+                      {op.bat_valide && <CheckCircle size={16} className="text-blue-600" />}
+                      {op.dans_planning_sre && <CheckCircle size={16} className="text-purple-600" />}
+                    </div>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Liste des campagnes */}
+      <div className="bg-white/90 backdrop-blur-lg rounded-2xl p-6 border-2 border-orange-200">
+        <h2 className="text-2xl font-bold gradient-text mb-6">📂 Mes Campagnes</h2>
+        
+        {loading ? (
+          <div className="text-center py-8">Chargement...</div>
+        ) : campaigns.length === 0 ? (
+          <div className="text-center py-8 text-gray-600">
+            Aucune campagne pour le moment
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {campaigns.map(campaign => {
+              const stats = getCampaignStats(campaign);
+              return (
+                <div
+                  key={campaign.id}
+                  onClick={() => setSelectedCampaign(campaign)}
+                  className="p-6 bg-gradient-to-r from-orange-50 to-rose-50 rounded-xl border-2 border-orange-200 hover:border-orange-400 cursor-pointer transition-all card-hover"
+                >
+                  <div className="flex items-start justify-between mb-4">
+                    <div>
+                      <h3 className="text-xl font-bold text-gray-800 mb-2">
+                        {campaign.name}
+                      </h3>
+                      <div className="text-sm text-gray-600">
+                        {campaign.entities?.name} • {stats.total} opération(s)
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-2xl font-bold text-orange-600">
+                        {stats.percentage}%
+                      </div>
+                      <div className="text-xs text-gray-600">
+                        {stats.validated}/{stats.total} validées
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Barre de progression */}
+                  <div className="w-full bg-gray-200 rounded-full h-3 mb-3">
+                    <div
+                      className="bg-gradient-to-r from-orange-500 to-rose-500 h-3 rounded-full transition-all"
+                      style={{ width: `${stats.percentage}%` }}
+                    ></div>
+                  </div>
+                  
+                  <div className="flex items-center gap-4 text-sm text-gray-600">
+                    <span>📅 {new Date(campaign.date_debut).toLocaleDateString('fr-FR')}</span>
+                    <span>→</span>
+                    <span>{new Date(campaign.date_fin).toLocaleDateString('fr-FR')}</span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
