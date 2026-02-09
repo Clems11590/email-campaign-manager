@@ -636,6 +636,18 @@ const copyMessageToClipboard = async (triggerEvent, operation) => {
           transition: all 0.3s;
         }
 
+        .copy-button {
+  transition: all 0.2s;
+}
+
+.copy-button:hover {
+  transform: scale(1.1);
+}
+
+.copy-button:active {
+  transform: scale(0.95);
+}
+
         .btn-secondary:hover {
           background: #fff7ed;
         }
