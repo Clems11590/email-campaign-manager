@@ -20,6 +20,8 @@ const EmailManagementTool = () => {
   const [showArchives, setShowArchives] = useState(false);
   const [selectedOperation, setSelectedOperation] = useState(null);
   const [selectedCampaign, setSelectedCampaign] = useState(null); // NOUVEAU : pour la timeline
+  const [expandedOperations, setExpandedOperations] = useState(new Set()); // NOUVEAU : pour garder les opérations ouvertes
+  const [showTemplates, setShowTemplates] = useState(false); // NOUVEAU : pour afficher les templates
   const [filters, setFilters] = useState({
     creaRealisee: false,
     batValide: false,
@@ -98,11 +100,14 @@ const EmailManagementTool = () => {
     if (!template || !operation) return '';
     const dateFormatted = new Date(operation.date_envoi).toLocaleDateString('fr-FR');
     
-    // Construire les liens SDLM selon la langue
+    // Construire les liens SDLM selon la langue (format sans émojis)
     let sdlmLinks = '';
-    if (operation.lien_sdlm_fr) sdlmLinks += `\n🇫🇷 FR : ${operation.lien_sdlm_fr}`;
-    if (operation.lien_sdlm_de) sdlmLinks += `\n🇩🇪 DE : ${operation.lien_sdlm_de}`;
-    if (operation.lien_sdlm_es) sdlmLinks += `\n🇪🇸 ES : ${operation.lien_sdlm_es}`;
+    if (operation.lien_sdlm_fr) sdlmLinks += `FR : ${operation.lien_sdlm_fr}\n`;
+    if (operation.lien_sdlm_de) sdlmLinks += `DE : ${operation.lien_sdlm_de}\n`;
+    if (operation.lien_sdlm_es) sdlmLinks += `ES : ${operation.lien_sdlm_es}\n`;
+    
+    // Enlever le dernier saut de ligne
+    sdlmLinks = sdlmLinks.trim();
     
     const variables = { 
       '{{titre}}': operation.titre || '', 
@@ -277,6 +282,19 @@ const EmailManagementTool = () => {
     return campaign ? campaign.name : null;
   };
 
+  // NOUVEAU : Toggle expanded state
+  const toggleExpanded = (operationId) => {
+    setExpandedOperations(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(operationId)) {
+        newSet.delete(operationId);
+      } else {
+        newSet.add(operationId);
+      }
+      return newSet;
+    });
+  };
+
   const addEntity = async () => {
     const newEntity = prompt('Nom de la nouvelle entité :');
     if (newEntity && !entities.find(e => e.name === newEntity)) {
@@ -319,8 +337,9 @@ const EmailManagementTool = () => {
           ))}
           <button onClick={() => { setShowCampaigns(true); setShowAnalytics(false); setShowCalendar(false); setShowArchives(false); }} style={{ ...styles.tab, ...(showCampaigns ? styles.tabActive : {}), display: 'flex', alignItems: 'center', gap: '8px' }}><FolderOpen size={18} />Campagnes</button>
           <button onClick={() => { setShowArchives(true); setShowCampaigns(false); setShowAnalytics(false); setShowCalendar(false); }} style={{ ...styles.tab, ...(showArchives ? styles.tabActive : {}), display: 'flex', alignItems: 'center', gap: '8px' }}><Archive size={18} />Archives</button>
-          <button onClick={() => { setShowCalendar(true); setShowAnalytics(false); setShowCampaigns(false); setShowArchives(false); }} style={{ ...styles.tab, ...(showCalendar ? styles.tabActive : {}), display: 'flex', alignItems: 'center', gap: '8px' }}><CalendarIcon size={18} />Calendrier</button>
-          <button onClick={() => { setShowAnalytics(true); setShowCalendar(false); setShowCampaigns(false); setShowArchives(false); }} style={{ ...styles.tab, ...(showAnalytics ? styles.tabActive : {}), display: 'flex', alignItems: 'center', gap: '8px' }}><TrendingUp size={18} />Analytics</button>
+          <button onClick={() => { setShowCalendar(true); setShowAnalytics(false); setShowCampaigns(false); setShowArchives(false); setShowTemplates(false); }} style={{ ...styles.tab, ...(showCalendar ? styles.tabActive : {}), display: 'flex', alignItems: 'center', gap: '8px' }}><CalendarIcon size={18} />Calendrier</button>
+          <button onClick={() => { setShowAnalytics(true); setShowCalendar(false); setShowCampaigns(false); setShowArchives(false); setShowTemplates(false); }} style={{ ...styles.tab, ...(showAnalytics ? styles.tabActive : {}), display: 'flex', alignItems: 'center', gap: '8px' }}><TrendingUp size={18} />Analytics</button>
+          <button onClick={() => { setShowTemplates(true); setShowAnalytics(false); setShowCalendar(false); setShowCampaigns(false); setShowArchives(false); }} style={{ ...styles.tab, ...(showTemplates ? styles.tabActive : {}), display: 'flex', alignItems: 'center', gap: '8px' }}><Mail size={18} />Templates</button>
           <button onClick={addEntity} style={{ ...styles.tab, fontSize: '20px' }}>+</button>
         </div>
       </div>
@@ -335,6 +354,8 @@ const EmailManagementTool = () => {
           <CalendarView entities={entities} onOperationClick={setSelectedOperation} />
         ) : showAnalytics ? (
           <AnalyticsView entities={entities} />
+        ) : showTemplates ? (
+          <TemplatesView entities={entities} messageTemplates={messageTemplates} loadMessageTemplates={loadMessageTemplates} />
         ) : (
           <>
             {/* Filtres */}
@@ -395,6 +416,8 @@ const EmailManagementTool = () => {
                   key={operation.id} 
                   operation={operation} 
                   campaignName={getCampaignName(operation.campaign_id)} 
+                  expanded={expandedOperations.has(operation.id)}
+                  toggleExpanded={() => toggleExpanded(operation.id)}
                   onUpdate={(updates) => updateOperation(operation.id, updates)} 
                   onDelete={() => deleteOperation(operation.id)} 
                   onArchive={() => archiveOperation(operation.id)} 
@@ -420,8 +443,7 @@ const EmailManagementTool = () => {
 };
 
 // Composant de carte d'opération (MODIFIÉ : affiche le badge campagne)
-const OperationCard = ({ operation, campaignName, onUpdate, onDelete, onArchive, onUnarchive, getAlertStatus, messageTemplates, copyMessageToClipboard, copiedMessageId }) => {
-  const [expanded, setExpanded] = useState(false);
+const OperationCard = ({ operation, campaignName, expanded, toggleExpanded, onUpdate, onDelete, onArchive, onUnarchive, getAlertStatus, messageTemplates, copyMessageToClipboard, copiedMessageId }) => {
   const [showProductModal, setShowProductModal] = useState(false);
   const alertStatus = getAlertStatus(operation.date_envoi);
   const hasTemplate = (event) => messageTemplates.some(t => t.trigger_event === event);
@@ -490,7 +512,7 @@ const OperationCard = ({ operation, campaignName, onUpdate, onDelete, onArchive,
             <button onClick={() => onArchive()} style={{ padding: '8px', border: 'none', background: 'none', cursor: 'pointer' }}><Archive size={18} color="#F97316" /></button>
           )}
           <button onClick={() => onDelete()} style={{ padding: '8px', border: 'none', background: 'none', cursor: 'pointer' }}><Trash2 size={18} color="#EF4444" /></button>
-          <button onClick={() => setExpanded(!expanded)} style={{ padding: '8px', border: 'none', background: 'none', cursor: 'pointer', fontSize: '18px', color: '#F97316' }}>{expanded ? '▲' : '▼'}</button>
+          <button onClick={toggleExpanded} style={{ padding: '8px', border: 'none', background: 'none', cursor: 'pointer', fontSize: '18px', color: '#F97316' }}>{expanded ? '▲' : '▼'}</button>
         </div>
       </div>
 
@@ -965,6 +987,12 @@ const CampaignsView = ({ entities, campaigns, loadCampaigns, operations, onViewT
     return operations.filter(op => op.campaign_id === campaignId).length;
   };
 
+  // NOUVEAU : Obtenir le nom de l'entité
+  const getEntityName = (entityId) => {
+    const entity = entities.find(e => e.id === entityId);
+    return entity ? entity.name : 'Inconnue';
+  };
+
   return (
     <div>
       <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '32px', border: '2px solid #FED7AA', marginBottom: '24px' }}>
@@ -983,11 +1011,18 @@ const CampaignsView = ({ entities, campaigns, loadCampaigns, operations, onViewT
         <div style={{ display: 'grid', gap: '16px' }}>
           {campaigns.map(campaign => {
             const operationsCount = getCampaignOperationsCount(campaign.id);
+            const entityName = getEntityName(campaign.entity_id);
             return (
               <div key={campaign.id} style={{ backgroundColor: 'white', borderRadius: '12px', padding: '24px', border: '2px solid #FED7AA' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
                   <div style={{ flex: 1 }}>
-                    <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#1F2937', marginBottom: '8px' }}>{campaign.name}</h3>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                      <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#1F2937', margin: 0 }}>{campaign.name}</h3>
+                      {/* NOUVEAU : Badge entité */}
+                      <span style={{ fontSize: '14px', backgroundColor: '#FEF3C7', color: '#92400E', padding: '4px 12px', borderRadius: '12px', fontWeight: '600' }}>
+                        {entityName}
+                      </span>
+                    </div>
                     <div style={{ fontSize: '14px', color: '#6B7280' }}>
                       📅 {new Date(campaign.start_date).toLocaleDateString('fr-FR')} → {new Date(campaign.end_date).toLocaleDateString('fr-FR')}
                     </div>
@@ -1197,6 +1232,135 @@ const AnalyticsView = ({ entities }) => {
           <div style={{ backgroundColor: '#FCE7F3', padding: '32px', borderRadius: '12px' }}><div style={{ fontSize: '48px', fontWeight: '700', color: '#EC4899', marginBottom: '8px' }}>{stats.campaigns}</div><div style={{ fontSize: '16px', color: '#6B7280' }}>📁 Campagnes</div></div>
         </div>
       )}
+    </div>
+  );
+};
+
+// Vue Templates
+const TemplatesView = ({ entities, messageTemplates, loadMessageTemplates }) => {
+  const [activeEntity, setActiveEntity] = useState(entities[0]?.name || '');
+
+  const entityTemplates = messageTemplates.filter(t => {
+    const entity = entities.find(e => e.name === activeEntity);
+    return entity && t.entity_id === entity.id;
+  });
+
+  const batEricTemplate = entityTemplates.find(t => t.trigger_event === 'bat_envoye_eric');
+  const batMarketingTemplate = entityTemplates.find(t => t.trigger_event === 'bat_envoye_marketing');
+
+  return (
+    <div>
+      <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '32px', border: '2px solid #FED7AA', marginBottom: '24px' }}>
+        <h2 style={{ fontSize: '28px', fontWeight: '700', color: '#F97316', marginBottom: '8px' }}>📧 Templates de mail</h2>
+        <p style={{ fontSize: '14px', color: '#6B7280' }}>Templates utilisés pour les messages automatiques</p>
+        
+        {/* Sélecteur d'entité */}
+        <div style={{ marginTop: '20px' }}>
+          <label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Entité</label>
+          <select value={activeEntity} onChange={(e) => setActiveEntity(e.target.value)} style={{ padding: '10px 14px', border: '2px solid #FED7AA', borderRadius: '8px', fontSize: '14px', minWidth: '200px' }}>
+            {entities.map(entity => (
+              <option key={entity.id} value={entity.name}>{entity.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Template BAT Eric */}
+      <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '24px', border: '2px solid #FED7AA', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+          <span style={{ fontSize: '24px' }}>📧</span>
+          <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#1F2937', margin: 0 }}>BAT → Eric</h3>
+          <span style={{ fontSize: '14px', backgroundColor: '#DCFCE7', color: '#166534', padding: '4px 12px', borderRadius: '12px', fontWeight: '600' }}>
+            {batEricTemplate ? '✅ Activé' : '❌ Non configuré'}
+          </span>
+        </div>
+        
+        {batEricTemplate ? (
+          <div style={{ backgroundColor: '#F9FAFB', padding: '16px', borderRadius: '8px' }}>
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ fontSize: '12px', color: '#6B7280', marginBottom: '4px' }}>Sujet</div>
+              <div style={{ fontSize: '14px', fontWeight: '600', color: '#1F2937', fontFamily: 'monospace', backgroundColor: 'white', padding: '8px 12px', borderRadius: '4px' }}>
+                {batEricTemplate.subject}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: '12px', color: '#6B7280', marginBottom: '4px' }}>Corps du message</div>
+              <pre style={{ fontSize: '14px', color: '#1F2937', fontFamily: 'monospace', backgroundColor: 'white', padding: '12px', borderRadius: '4px', whiteSpace: 'pre-wrap', margin: 0 }}>
+                {batEricTemplate.body}
+              </pre>
+            </div>
+            <div style={{ marginTop: '12px', fontSize: '12px', color: '#6B7280' }}>
+              💡 Variables disponibles : {'{'}{'{'} titre {'}'}{'}'},  {'{'}{'{'} liens_sdlm {'}'}{'}'},  {'{'}{'{'} date_envoi {'}'}{'}'} 
+            </div>
+          </div>
+        ) : (
+          <div style={{ padding: '20px', textAlign: 'center', backgroundColor: '#FEF2F2', borderRadius: '8px' }}>
+            <div style={{ fontSize: '14px', color: '#991B1B' }}>❌ Template non configuré</div>
+            <div style={{ fontSize: '12px', color: '#B91C1C', marginTop: '4px' }}>
+              Exécutez le script SQL create-bat-templates.sql pour créer ce template
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Template BAT Marketing */}
+      <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '24px', border: '2px solid #FED7AA', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+          <span style={{ fontSize: '24px' }}>📧</span>
+          <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#1F2937', margin: 0 }}>BAT → Marketing</h3>
+          <span style={{ fontSize: '14px', backgroundColor: '#DCFCE7', color: '#166534', padding: '4px 12px', borderRadius: '12px', fontWeight: '600' }}>
+            {batMarketingTemplate ? '✅ Activé' : '❌ Non configuré'}
+          </span>
+        </div>
+        
+        {batMarketingTemplate ? (
+          <div style={{ backgroundColor: '#F9FAFB', padding: '16px', borderRadius: '8px' }}>
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ fontSize: '12px', color: '#6B7280', marginBottom: '4px' }}>Sujet</div>
+              <div style={{ fontSize: '14px', fontWeight: '600', color: '#1F2937', fontFamily: 'monospace', backgroundColor: 'white', padding: '8px 12px', borderRadius: '4px' }}>
+                {batMarketingTemplate.subject}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: '12px', color: '#6B7280', marginBottom: '4px' }}>Corps du message</div>
+              <pre style={{ fontSize: '14px', color: '#1F2937', fontFamily: 'monospace', backgroundColor: 'white', padding: '12px', borderRadius: '4px', whiteSpace: 'pre-wrap', margin: 0 }}>
+                {batMarketingTemplate.body}
+              </pre>
+            </div>
+            <div style={{ marginTop: '12px', fontSize: '12px', color: '#6B7280' }}>
+              💡 Variables disponibles : {'{'}{'{'} titre {'}'}{'}'},  {'{'}{'{'} liens_sdlm {'}'}{'}'},  {'{'}{'{'} date_envoi {'}'}{'}'} 
+            </div>
+          </div>
+        ) : (
+          <div style={{ padding: '20px', textAlign: 'center', backgroundColor: '#FEF2F2', borderRadius: '8px' }}>
+            <div style={{ fontSize: '14px', color: '#991B1B' }}>❌ Template non configuré</div>
+            <div style={{ fontSize: '12px', color: '#B91C1C', marginTop: '4px' }}>
+              Exécutez le script SQL create-bat-templates.sql pour créer ce template
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Exemple de message généré */}
+      <div style={{ backgroundColor: '#FFF7ED', borderRadius: '12px', padding: '24px', border: '2px solid #FED7AA' }}>
+        <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#F97316', marginBottom: '12px' }}>💡 Exemple de message généré</h3>
+        <div style={{ backgroundColor: 'white', padding: '16px', borderRadius: '8px', fontFamily: 'monospace', fontSize: '14px', whiteSpace: 'pre-wrap' }}>
+          {`Sujet : BAT Email - Black Friday 2024
+
+Bonjour,
+
+Voici le(s) e-mail(s) pour Black Friday 2024
+
+FR : https://example.com/sdlm-fr
+DE : https://example.com/sdlm-de
+ES : https://example.com/sdlm-es
+
+Date d'envoi : 25/11/2024`}
+        </div>
+        <div style={{ marginTop: '12px', fontSize: '12px', color: '#6B7280' }}>
+          ℹ️ Les variables sont automatiquement remplacées par les vraies valeurs de l'opération
+        </div>
+      </div>
     </div>
   );
 };
