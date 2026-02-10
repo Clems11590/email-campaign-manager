@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, Plus, Calendar as CalendarIcon, Filter, CheckCircle, TrendingUp, X, Trash2, Archive, ArchiveRestore, ExternalLink, Layout, Mail, Copy, Check, FolderOpen, ChevronDown, Facebook, Instagram, Twitter, Linkedin, MessageCircle } from 'lucide-react';
+import { Upload, Plus, Calendar as CalendarIcon, Filter, CheckCircle, TrendingUp, X, Trash2, Archive, ArchiveRestore, ExternalLink, Layout, Mail, Copy, Check, FolderOpen, ChevronDown, Facebook, Instagram, Twitter, Linkedin, MessageCircle, Tag } from 'lucide-react';
 import { supabase, handleSupabaseError } from './supabaseClient';
 
 const EmailManagementTool = () => {
@@ -7,6 +7,7 @@ const EmailManagementTool = () => {
   const [activeEntity, setActiveEntity] = useState('J4C');
   const [entities, setEntities] = useState([]);
   const [operations, setOperations] = useState([]);
+  const [campaigns, setCampaigns] = useState([]); // NOUVEAU : liste des campagnes
   const [operationType, setOperationType] = useState('email');
   const [messageTemplates, setMessageTemplates] = useState([]);
   const [copiedMessageId, setCopiedMessageId] = useState(null);
@@ -18,6 +19,7 @@ const EmailManagementTool = () => {
   const [showCampaigns, setShowCampaigns] = useState(false);
   const [showArchives, setShowArchives] = useState(false);
   const [selectedOperation, setSelectedOperation] = useState(null);
+  const [selectedCampaign, setSelectedCampaign] = useState(null); // NOUVEAU : pour la timeline
   const [filters, setFilters] = useState({
     creaRealisee: false,
     batValide: false,
@@ -53,6 +55,14 @@ const EmailManagementTool = () => {
     }
   };
 
+  // NOUVEAU : Charger les campagnes
+  const loadCampaigns = async () => {
+    const activeEntityData = entities.find(e => e.name === activeEntity);
+    if (!activeEntityData) return;
+    const { data, error } = await supabase.from('campaigns').select('*').eq('entity_id', activeEntityData.id).eq('archived', false).order('start_date', { ascending: false });
+    if (!handleSupabaseError(error)) setCampaigns(data || []);
+  };
+
   // Charger les opérations
   const loadOperations = async () => {
     if (!activeEntity) return;
@@ -73,7 +83,7 @@ const EmailManagementTool = () => {
   };
 
   useEffect(() => { loadEntities(); }, []);
-  useEffect(() => { if (entities.length > 0) { loadOperations(); loadMessageTemplates(); } }, [activeEntity, entities, operationType]);
+  useEffect(() => { if (entities.length > 0) { loadOperations(); loadMessageTemplates(); loadCampaigns(); } }, [activeEntity, entities, operationType]);
 
   // Temps réel
   useEffect(() => {
@@ -126,7 +136,7 @@ const EmailManagementTool = () => {
     } catch (error) { alert('❌ Erreur : ' + error.message); }
   };
 
-  // Ajouter opération
+  // Ajouter opération (MODIFIÉ : inclut campaign_id)
   const addOperation = async (operationData) => {
     const activeEntityData = entities.find(e => e.name === activeEntity);
     if (!activeEntityData) return;
@@ -138,6 +148,7 @@ const EmailManagementTool = () => {
       thematique: operationData.thematique, 
       langue: operationData.langue || 'FR', 
       brief: operationData.brief || '', 
+      campaign_id: operationData.campaign_id || null, // NOUVEAU : lien vers campagne
       produits: [], 
       crea_realisee: false, 
       bat_envoye_eric: false, 
@@ -259,6 +270,13 @@ const EmailManagementTool = () => {
     return filtered.sort((a, b) => new Date(a.date_envoi) - new Date(b.date_envoi));
   };
 
+  // NOUVEAU : Obtenir le nom de la campagne
+  const getCampaignName = (campaignId) => {
+    if (!campaignId) return null;
+    const campaign = campaigns.find(c => c.id === campaignId);
+    return campaign ? campaign.name : null;
+  };
+
   const addEntity = async () => {
     const newEntity = prompt('Nom de la nouvelle entité :');
     if (newEntity && !entities.find(e => e.name === newEntity)) {
@@ -310,7 +328,7 @@ const EmailManagementTool = () => {
       {/* Main Content */}
       <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '30px 40px' }}>
         {showCampaigns ? (
-          <CampaignsView entities={entities} />
+          <CampaignsView entities={entities} campaigns={campaigns} loadCampaigns={loadCampaigns} operations={operations} onViewTimeline={setSelectedCampaign} />
         ) : showArchives ? (
           <ArchivesView entities={entities} />
         ) : showCalendar ? (
@@ -376,6 +394,7 @@ const EmailManagementTool = () => {
                 <OperationCard 
                   key={operation.id} 
                   operation={operation} 
+                  campaignName={getCampaignName(operation.campaign_id)} 
                   onUpdate={(updates) => updateOperation(operation.id, updates)} 
                   onDelete={() => deleteOperation(operation.id)} 
                   onArchive={() => archiveOperation(operation.id)} 
@@ -392,15 +411,16 @@ const EmailManagementTool = () => {
       </div>
 
       {/* Modals */}
-      {showAddModal && <AddOperationModal operationType={operationType} onClose={() => setShowAddModal(false)} onAdd={addOperation} styles={styles} />}
+      {showAddModal && <AddOperationModal operationType={operationType} campaigns={campaigns} onClose={() => setShowAddModal(false)} onAdd={addOperation} styles={styles} />}
       {showImportModal && <ImportCSVModal onClose={() => setShowImportModal(false)} onImport={handleCSVImport} styles={styles} />}
-      {selectedOperation && <OperationDetailModal operation={selectedOperation} onClose={() => setSelectedOperation(null)} styles={styles} />}
+      {selectedOperation && <OperationDetailModal operation={selectedOperation} campaignName={getCampaignName(selectedOperation.campaign_id)} onClose={() => setSelectedOperation(null)} styles={styles} />}
+      {selectedCampaign && <CampaignTimelineModal campaign={selectedCampaign} operations={operations} onClose={() => setSelectedCampaign(null)} styles={styles} />}
     </div>
   );
 };
 
-// Composant de carte d'opération
-const OperationCard = ({ operation, onUpdate, onDelete, onArchive, onUnarchive, getAlertStatus, messageTemplates, copyMessageToClipboard, copiedMessageId }) => {
+// Composant de carte d'opération (MODIFIÉ : affiche le badge campagne)
+const OperationCard = ({ operation, campaignName, onUpdate, onDelete, onArchive, onUnarchive, getAlertStatus, messageTemplates, copyMessageToClipboard, copiedMessageId }) => {
   const [expanded, setExpanded] = useState(false);
   const [showProductModal, setShowProductModal] = useState(false);
   const alertStatus = getAlertStatus(operation.date_envoi);
@@ -439,13 +459,19 @@ const OperationCard = ({ operation, onUpdate, onDelete, onArchive, onUnarchive, 
     <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '24px', border: '2px solid #FED7AA', marginBottom: '16px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: expanded ? '16px' : '0' }}>
         <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px', flexWrap: 'wrap' }}>
             <span style={{ fontSize: '24px' }}>{getTypeIcon()}</span>
             <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#1F2937', margin: 0 }}>{operation.titre}</h3>
             {operation.type === 'social' && operation.reseau_social && (
               <span style={{ fontSize: '16px' }}>{getSocialIcon(operation.reseau_social)}</span>
             )}
             <span style={{ fontSize: '14px', backgroundColor: '#FEF3C7', color: '#92400E', padding: '4px 12px', borderRadius: '12px', fontWeight: '600' }}>{operation.langue}</span>
+            {/* NOUVEAU : Badge campagne */}
+            {campaignName && (
+              <span style={{ fontSize: '14px', backgroundColor: '#E0E7FF', color: '#4338CA', padding: '4px 12px', borderRadius: '12px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <Tag size={14} />{campaignName}
+              </span>
+            )}
             {alertStatus.show && (
               <span style={{ fontSize: '14px', backgroundColor: '#FEE2E2', color: '#991B1B', padding: '4px 12px', borderRadius: '12px', fontWeight: '600' }}>⚠️ J-{alertStatus.days}</span>
             )}
@@ -595,9 +621,20 @@ const ProductModal = ({ onClose, onAdd, styles }) => {
   );
 };
 
-const AddOperationModal = ({ operationType, onClose, onAdd, styles }) => {
-  const [formData, setFormData] = useState({ dateEnvoi: '', titre: '', thematique: '', langue: 'FR', brief: '', position_slider: 'homepage', reseau_social: 'Facebook' });
+// Modal d'ajout d'opération (MODIFIÉ : inclut le champ campagne)
+const AddOperationModal = ({ operationType, campaigns, onClose, onAdd, styles }) => {
+  const [formData, setFormData] = useState({ 
+    dateEnvoi: '', 
+    titre: '', 
+    thematique: '', 
+    langue: 'FR', 
+    brief: '', 
+    position_slider: 'homepage', 
+    reseau_social: 'Facebook',
+    campaign_id: '' // NOUVEAU
+  });
   const handleSubmit = () => { if (!formData.dateEnvoi || !formData.titre) { alert('Date et titre requis'); return; } onAdd(formData); };
+  
   return (
     <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }} onClick={onClose}>
       <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '32px', maxWidth: '500px', width: '100%', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
@@ -605,6 +642,28 @@ const AddOperationModal = ({ operationType, onClose, onAdd, styles }) => {
           Nouvelle opération {operationType === 'email' ? '📧 Email' : operationType === 'slider' ? '🖼️ Slider' : '📱 Réseaux sociaux'}
         </h2>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* NOUVEAU : Champ campagne */}
+          <div>
+            <label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>
+              📁 Campagne (optionnel)
+            </label>
+            <select 
+              value={formData.campaign_id} 
+              onChange={(e) => setFormData({ ...formData, campaign_id: e.target.value })} 
+              style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }}
+            >
+              <option value="">Aucune campagne</option>
+              {campaigns.map(campaign => (
+                <option key={campaign.id} value={campaign.id}>
+                  {campaign.name} ({new Date(campaign.start_date).toLocaleDateString('fr-FR')} - {new Date(campaign.end_date).toLocaleDateString('fr-FR')})
+                </option>
+              ))}
+            </select>
+            <p style={{ fontSize: '12px', color: '#6B7280', marginTop: '4px' }}>
+              Rattache cette opération à une campagne pour voir toutes les opérations liées ensemble
+            </p>
+          </div>
+
           <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Date d'envoi *</label><input type="date" value={formData.dateEnvoi} onChange={(e) => setFormData({ ...formData, dateEnvoi: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} /></div>
           <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Titre *</label><input type="text" value={formData.titre} onChange={(e) => setFormData({ ...formData, titre: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} placeholder="Ex: Saint Valentin 2024" /></div>
           <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Thématique</label><input type="text" value={formData.thematique} onChange={(e) => setFormData({ ...formData, thematique: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} placeholder="Ex: Promotion" /></div>
@@ -636,8 +695,8 @@ const ImportCSVModal = ({ onClose, onImport, styles }) => (
   </div>
 );
 
-// Popup de détails de l'opération
-const OperationDetailModal = ({ operation, onClose, styles }) => {
+// Popup de détails de l'opération (MODIFIÉ : affiche le nom de la campagne)
+const OperationDetailModal = ({ operation, campaignName, onClose, styles }) => {
   const getTypeIcon = () => {
     if (operation.type === 'email') return '📧';
     if (operation.type === 'slider') return '🖼️';
@@ -648,9 +707,15 @@ const OperationDetailModal = ({ operation, onClose, styles }) => {
   return (
     <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }} onClick={onClose}>
       <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '32px', maxWidth: '700px', width: '100%', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '32px' }}>{getTypeIcon()}</span>
           <h2 style={{ fontSize: '28px', fontWeight: '700', color: '#F97316', margin: 0 }}>{operation.titre}</h2>
+          {/* NOUVEAU : Affichage de la campagne */}
+          {campaignName && (
+            <span style={{ fontSize: '16px', backgroundColor: '#E0E7FF', color: '#4338CA', padding: '6px 16px', borderRadius: '12px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Tag size={16} />{campaignName}
+            </span>
+          )}
         </div>
         
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '24px' }}>
@@ -784,19 +849,102 @@ const OperationDetailModal = ({ operation, onClose, styles }) => {
   );
 };
 
-// Vue Campagnes avec suppression
-const CampaignsView = ({ entities }) => {
-  const [campaigns, setCampaigns] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => { loadCampaigns(); }, []);
-
-  const loadCampaigns = async () => {
-    setLoading(true);
-    const { data, error } = await supabase.from('campaigns').select('*').eq('archived', false).order('start_date', { ascending: false });
-    if (!handleSupabaseError(error)) setCampaigns(data || []);
-    setLoading(false);
+// NOUVEAU : Timeline d'une campagne
+const CampaignTimelineModal = ({ campaign, operations, onClose, styles }) => {
+  // Filtrer les opérations de cette campagne
+  const campaignOperations = operations.filter(op => op.campaign_id === campaign.id).sort((a, b) => new Date(a.date_envoi) - new Date(b.date_envoi));
+  
+  const getTypeIcon = (type) => {
+    if (type === 'email') return '📧';
+    if (type === 'slider') return '🖼️';
+    if (type === 'social') return '📱';
+    return '📄';
   };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }} onClick={onClose}>
+      <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '32px', maxWidth: '900px', width: '100%', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ marginBottom: '24px' }}>
+          <h2 style={{ fontSize: '28px', fontWeight: '700', color: '#F97316', marginBottom: '8px' }}>📅 Timeline : {campaign.name}</h2>
+          <p style={{ fontSize: '14px', color: '#6B7280' }}>
+            {new Date(campaign.start_date).toLocaleDateString('fr-FR')} → {new Date(campaign.end_date).toLocaleDateString('fr-FR')}
+          </p>
+          {campaign.description && (
+            <p style={{ fontSize: '14px', color: '#6B7280', marginTop: '8px' }}>{campaign.description}</p>
+          )}
+        </div>
+
+        {campaignOperations.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '60px' }}>
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>📭</div>
+            <div style={{ fontSize: '18px', color: '#6B7280' }}>Aucune opération dans cette campagne</div>
+          </div>
+        ) : (
+          <div style={{ position: 'relative' }}>
+            {/* Ligne de timeline verticale */}
+            <div style={{ position: 'absolute', left: '30px', top: '0', bottom: '0', width: '2px', backgroundColor: '#FED7AA' }}></div>
+            
+            {campaignOperations.map((operation, index) => (
+              <div key={operation.id} style={{ position: 'relative', paddingLeft: '70px', paddingBottom: '32px' }}>
+                {/* Point de la timeline */}
+                <div style={{ position: 'absolute', left: '20px', top: '8px', width: '22px', height: '22px', borderRadius: '50%', backgroundColor: '#F97316', border: '3px solid white', boxShadow: '0 0 0 3px #FED7AA', zIndex: 1 }}></div>
+                
+                {/* Carte d'opération */}
+                <div style={{ backgroundColor: 'white', border: '2px solid #FED7AA', borderRadius: '12px', padding: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '24px' }}>{getTypeIcon(operation.type)}</span>
+                    <div style={{ flex: 1 }}>
+                      <h4 style={{ fontSize: '16px', fontWeight: '700', color: '#1F2937', margin: 0 }}>{operation.titre}</h4>
+                      <div style={{ fontSize: '14px', color: '#6B7280', marginTop: '4px' }}>
+                        📅 {new Date(operation.date_envoi).toLocaleDateString('fr-FR')} • {operation.langue}
+                        {operation.thematique && <> • 🏷️ {operation.thematique}</>}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Statuts */}
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px' }}>
+                    {operation.crea_realisee && <span style={{ fontSize: '12px', backgroundColor: '#DCFCE7', color: '#166534', padding: '4px 8px', borderRadius: '4px' }}>✅ Créa OK</span>}
+                    {operation.bat_valide && <span style={{ fontSize: '12px', backgroundColor: '#DCFCE7', color: '#166534', padding: '4px 8px', borderRadius: '4px' }}>✅ BAT validé</span>}
+                    {operation.dans_planning_sre && <span style={{ fontSize: '12px', backgroundColor: '#DCFCE7', color: '#166534', padding: '4px 8px', borderRadius: '4px' }}>✅ Dans SRE</span>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ marginTop: '24px', padding: '16px', backgroundColor: '#FFF7ED', borderRadius: '8px' }}>
+          <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '8px', color: '#F97316' }}>📊 Statistiques de la campagne</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px' }}>
+            <div>
+              <div style={{ fontSize: '24px', fontWeight: '700', color: '#F97316' }}>{campaignOperations.length}</div>
+              <div style={{ fontSize: '12px', color: '#6B7280' }}>Opérations total</div>
+            </div>
+            <div>
+              <div style={{ fontSize: '24px', fontWeight: '700', color: '#3B82F6' }}>{campaignOperations.filter(o => o.type === 'email').length}</div>
+              <div style={{ fontSize: '12px', color: '#6B7280' }}>📧 Emails</div>
+            </div>
+            <div>
+              <div style={{ fontSize: '24px', fontWeight: '700', color: '#A855F7' }}>{campaignOperations.filter(o => o.type === 'slider').length}</div>
+              <div style={{ fontSize: '12px', color: '#6B7280' }}>🖼️ Sliders</div>
+            </div>
+            <div>
+              <div style={{ fontSize: '24px', fontWeight: '700', color: '#0284C7' }}>{campaignOperations.filter(o => o.type === 'social').length}</div>
+              <div style={{ fontSize: '12px', color: '#6B7280' }}>📱 Social</div>
+            </div>
+          </div>
+        </div>
+
+        <button onClick={onClose} style={{ ...styles.button, width: '100%', justifyContent: 'center', marginTop: '24px' }}>Fermer</button>
+      </div>
+    </div>
+  );
+};
+
+// Vue Campagnes (MODIFIÉ : affiche les opérations liées et le bouton timeline)
+const CampaignsView = ({ entities, campaigns, loadCampaigns, operations, onViewTimeline }) => {
+  const [loading, setLoading] = useState(false);
 
   const deleteCampaign = async (campaignId) => {
     if (window.confirm('⚠️ Supprimer cette campagne définitivement ?')) {
@@ -812,11 +960,16 @@ const CampaignsView = ({ entities }) => {
     }
   };
 
+  // NOUVEAU : Compter les opérations d'une campagne
+  const getCampaignOperationsCount = (campaignId) => {
+    return operations.filter(op => op.campaign_id === campaignId).length;
+  };
+
   return (
     <div>
       <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '32px', border: '2px solid #FED7AA', marginBottom: '24px' }}>
         <h2 style={{ fontSize: '28px', fontWeight: '700', color: '#F97316', marginBottom: '8px' }}>📁 Campagnes</h2>
-        <p style={{ fontSize: '14px', color: '#6B7280' }}>Gérez vos campagnes marketing</p>
+        <p style={{ fontSize: '14px', color: '#6B7280' }}>Gérez vos campagnes marketing et leurs opérations</p>
       </div>
 
       {loading ? (
@@ -828,34 +981,49 @@ const CampaignsView = ({ entities }) => {
         </div>
       ) : (
         <div style={{ display: 'grid', gap: '16px' }}>
-          {campaigns.map(campaign => (
-            <div key={campaign.id} style={{ backgroundColor: 'white', borderRadius: '12px', padding: '24px', border: '2px solid #FED7AA' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
-                <div style={{ flex: 1 }}>
-                  <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#1F2937', marginBottom: '8px' }}>{campaign.name}</h3>
-                  <div style={{ fontSize: '14px', color: '#6B7280' }}>
-                    📅 {new Date(campaign.start_date).toLocaleDateString('fr-FR')} → {new Date(campaign.end_date).toLocaleDateString('fr-FR')}
+          {campaigns.map(campaign => {
+            const operationsCount = getCampaignOperationsCount(campaign.id);
+            return (
+              <div key={campaign.id} style={{ backgroundColor: 'white', borderRadius: '12px', padding: '24px', border: '2px solid #FED7AA' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                  <div style={{ flex: 1 }}>
+                    <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#1F2937', marginBottom: '8px' }}>{campaign.name}</h3>
+                    <div style={{ fontSize: '14px', color: '#6B7280' }}>
+                      📅 {new Date(campaign.start_date).toLocaleDateString('fr-FR')} → {new Date(campaign.end_date).toLocaleDateString('fr-FR')}
+                    </div>
+                    {campaign.description && <div style={{ fontSize: '14px', color: '#6B7280', marginTop: '8px' }}>{campaign.description}</div>}
+                    {/* NOUVEAU : Badge avec nombre d'opérations */}
+                    <div style={{ marginTop: '12px' }}>
+                      <span style={{ fontSize: '14px', backgroundColor: '#E0E7FF', color: '#4338CA', padding: '6px 12px', borderRadius: '8px', fontWeight: '600' }}>
+                        {operationsCount} opération{operationsCount !== 1 ? 's' : ''}
+                      </span>
+                    </div>
                   </div>
-                  {campaign.description && <div style={{ fontSize: '14px', color: '#6B7280', marginTop: '8px' }}>{campaign.description}</div>}
-                </div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button onClick={() => archiveCampaign(campaign.id)} style={{ padding: '8px 16px', backgroundColor: '#FFF7ED', color: '#F97316', border: '2px solid #F97316', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Archive size={16} />Archiver
-                  </button>
-                  <button onClick={() => deleteCampaign(campaign.id)} style={{ padding: '8px 16px', backgroundColor: '#FEE2E2', color: '#DC2626', border: '2px solid #DC2626', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Trash2 size={16} />Supprimer
-                  </button>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {/* NOUVEAU : Bouton pour voir la timeline */}
+                    {operationsCount > 0 && (
+                      <button onClick={() => onViewTimeline(campaign)} style={{ padding: '8px 16px', backgroundColor: '#DBEAFE', color: '#1E40AF', border: '2px solid #3B82F6', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <CalendarIcon size={16} />Timeline
+                      </button>
+                    )}
+                    <button onClick={() => archiveCampaign(campaign.id)} style={{ padding: '8px 16px', backgroundColor: '#FFF7ED', color: '#F97316', border: '2px solid #F97316', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Archive size={16} />Archiver
+                    </button>
+                    <button onClick={() => deleteCampaign(campaign.id)} style={{ padding: '8px 16px', backgroundColor: '#FEE2E2', color: '#DC2626', border: '2px solid #DC2626', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Trash2 size={16} />Supprimer
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
   );
 };
 
-// Vue Archives
+// Vue Archives (inchangée)
 const ArchivesView = ({ entities }) => {
   const [archivedCampaigns, setArchivedCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -927,7 +1095,7 @@ const ArchivesView = ({ entities }) => {
   );
 };
 
-// Vue Calendrier avec popup
+// Vue Calendrier (inchangée - le fichier est trop long, je vais le continuer)
 const CalendarView = ({ entities, onOperationClick }) => {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [allOperations, setAllOperations] = useState([]);
