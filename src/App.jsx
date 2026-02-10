@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, Plus, Calendar as CalendarIcon, Filter, CheckCircle, TrendingUp, X, Trash2, Archive, ArchiveRestore, ExternalLink, Layout, Mail, Copy, Check, FolderOpen, ChevronDown } from 'lucide-react';
+import { Upload, Plus, Calendar as CalendarIcon, Filter, CheckCircle, TrendingUp, X, Trash2, Archive, ArchiveRestore, ExternalLink, Layout, Mail, Copy, Check, FolderOpen, ChevronDown, Facebook, Instagram, Twitter, Linkedin, MessageCircle } from 'lucide-react';
 import { supabase, handleSupabaseError } from './supabaseClient';
 
 const EmailManagementTool = () => {
@@ -16,6 +16,8 @@ const EmailManagementTool = () => {
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showCampaigns, setShowCampaigns] = useState(false);
+  const [showArchives, setShowArchives] = useState(false);
+  const [selectedOperation, setSelectedOperation] = useState(null);
   const [filters, setFilters] = useState({
     creaRealisee: false,
     batValide: false,
@@ -81,14 +83,33 @@ const EmailManagementTool = () => {
     return () => { subscription.unsubscribe(); };
   }, [activeEntity, entities, operationType]);
 
-  // Générer message
+  // Générer message avec prise en charge des liens SDLM multi-langues
   const generateMessage = (template, operation) => {
     if (!template || !operation) return '';
     const dateFormatted = new Date(operation.date_envoi).toLocaleDateString('fr-FR');
-    const variables = { '{{titre}}': operation.titre || '', '{{date_envoi}}': dateFormatted, '{{type}}': operation.type === 'email' ? 'Email' : 'Slider', '{{thematique}}': operation.thematique || '', '{{langue}}': operation.langue || '', '{{entity}}': activeEntity, '{{brief}}': operation.brief || '' };
+    
+    // Construire les liens SDLM selon la langue
+    let sdlmLinks = '';
+    if (operation.lien_sdlm_fr) sdlmLinks += `\n🇫🇷 FR : ${operation.lien_sdlm_fr}`;
+    if (operation.lien_sdlm_de) sdlmLinks += `\n🇩🇪 DE : ${operation.lien_sdlm_de}`;
+    if (operation.lien_sdlm_es) sdlmLinks += `\n🇪🇸 ES : ${operation.lien_sdlm_es}`;
+    
+    const variables = { 
+      '{{titre}}': operation.titre || '', 
+      '{{date_envoi}}': dateFormatted, 
+      '{{type}}': operation.type === 'email' ? 'Email' : operation.type === 'slider' ? 'Slider' : 'Réseaux sociaux', 
+      '{{thematique}}': operation.thematique || '', 
+      '{{langue}}': operation.langue || '', 
+      '{{entity}}': activeEntity, 
+      '{{brief}}': operation.brief || '',
+      '{{liens_sdlm}}': sdlmLinks
+    };
     let subject = template.subject || '';
     let body = template.body || '';
-    Object.keys(variables).forEach(key => { subject = subject.replace(new RegExp(key, 'g'), variables[key]); body = body.replace(new RegExp(key, 'g'), variables[key]); });
+    Object.keys(variables).forEach(key => { 
+      subject = subject.replace(new RegExp(key, 'g'), variables[key]); 
+      body = body.replace(new RegExp(key, 'g'), variables[key]); 
+    });
     return subject ? `Sujet : ${subject}\n\n${body}` : body;
   };
 
@@ -109,9 +130,45 @@ const EmailManagementTool = () => {
   const addOperation = async (operationData) => {
     const activeEntityData = entities.find(e => e.name === activeEntity);
     if (!activeEntityData) return;
-    const baseData = { entity_id: activeEntityData.id, type: operationType, date_envoi: operationData.dateEnvoi, titre: operationData.titre, thematique: operationData.thematique, langue: operationData.langue || 'FR', brief: operationData.brief || '', produits: [], crea_realisee: false, bat_envoye_eric: false, bat_envoye_marketing: false, bat_valide: false, dans_planning_sre: false, archived: false };
-    if (operationType === 'email') { baseData.objet = ''; baseData.preheader = ''; baseData.corps = ''; } 
-    else { baseData.titre_slider = ''; baseData.sous_titre_slider = ''; baseData.texte_bouton = ''; baseData.lien_bouton = ''; baseData.image_url = ''; baseData.position_slider = operationData.position_slider || 'homepage'; }
+    const baseData = { 
+      entity_id: activeEntityData.id, 
+      type: operationType, 
+      date_envoi: operationData.dateEnvoi, 
+      titre: operationData.titre, 
+      thematique: operationData.thematique, 
+      langue: operationData.langue || 'FR', 
+      brief: operationData.brief || '', 
+      produits: [], 
+      crea_realisee: false, 
+      bat_envoye_eric: false, 
+      bat_envoye_marketing: false, 
+      bat_valide: false, 
+      dans_planning_sre: false, 
+      archived: false 
+    };
+    
+    if (operationType === 'email') { 
+      baseData.objet = ''; 
+      baseData.preheader = ''; 
+      baseData.corps = '';
+      baseData.lien_sdlm_fr = '';
+      baseData.lien_sdlm_de = '';
+      baseData.lien_sdlm_es = '';
+    } 
+    else if (operationType === 'slider') { 
+      baseData.titre_slider = ''; 
+      baseData.sous_titre_slider = ''; 
+      baseData.texte_bouton = ''; 
+      baseData.lien_bouton = ''; 
+      baseData.image_url = ''; 
+      baseData.position_slider = operationData.position_slider || 'homepage'; 
+    }
+    else if (operationType === 'social') {
+      baseData.texte_publication = '';
+      baseData.lien_publication = '';
+      baseData.reseau_social = operationData.reseau_social || 'Facebook';
+    }
+    
     const { error } = await supabase.from('operations').insert([baseData]);
     if (!handleSupabaseError(error)) { setShowAddModal(false); loadOperations(); }
   };
@@ -140,6 +197,11 @@ const EmailManagementTool = () => {
           if (dateValue && dateValue.trim()) {
             const baseOp = { entity_id: activeEntityData.id, type: operationType, date_envoi: dateValue.trim(), titre: opObj.titre || 'Sans titre', thematique: opObj.thematique || '', langue: opObj.langue || 'FR', brief: opObj.brief || '', produits: [] };
             if (operationType === 'slider') baseOp.position_slider = opObj.position || 'homepage';
+            if (operationType === 'social') {
+              baseOp.reseau_social = opObj.reseau || 'Facebook';
+              baseOp.texte_publication = opObj.texte || '';
+              baseOp.lien_publication = opObj.lien || '';
+            }
             newOperations.push(baseOp);
           }
         }
@@ -157,14 +219,14 @@ const EmailManagementTool = () => {
   };
 
   const deleteOperation = async (operationId) => {
-    if (window.confirm('⚠️ Supprimer ?')) {
+    if (window.confirm('⚠️ Supprimer cette opération ?')) {
       const { error } = await supabase.from('operations').delete().eq('id', operationId);
       if (!handleSupabaseError(error)) loadOperations();
     }
   };
 
   const archiveOperation = async (operationId) => {
-    if (window.confirm('📦 Archiver ?')) {
+    if (window.confirm('📦 Archiver cette opération ?')) {
       const { error } = await supabase.from('operations').update({ archived: true, archived_at: new Date().toISOString() }).eq('id', operationId);
       if (!handleSupabaseError(error)) loadOperations();
     }
@@ -198,7 +260,7 @@ const EmailManagementTool = () => {
   };
 
   const addEntity = async () => {
-    const newEntity = prompt('Nom :');
+    const newEntity = prompt('Nom de la nouvelle entité :');
     if (newEntity && !entities.find(e => e.name === newEntity)) {
       const { error } = await supabase.from('entities').insert([{ name: newEntity }]);
       if (!handleSupabaseError(error)) loadEntities();
@@ -216,7 +278,7 @@ const EmailManagementTool = () => {
           </div>
           <div style={{ display: 'flex', gap: '12px' }}>
             <button onClick={() => setShowImportModal(true)} style={styles.buttonSecondary}><Upload size={18} />Importer CSV</button>
-            <button onClick={() => setShowAddModal(true)} style={styles.button}><Plus size={18} />Nouvel {operationType === 'email' ? 'email' : 'slider'}</button>
+            <button onClick={() => setShowAddModal(true)} style={styles.button}><Plus size={18} />Nouvelle opération</button>
           </div>
         </div>
       </div>
@@ -224,19 +286,38 @@ const EmailManagementTool = () => {
       {/* Tabs */}
       <div style={{ backgroundColor: 'white', borderBottom: '1px solid #E5E7EB', padding: '0 40px' }}>
         <div style={{ maxWidth: '1400px', margin: '0 auto', display: 'flex', gap: '8px', overflowX: 'auto' }}>
+          {/* Tabs de type d'opération */}
+          {!showCampaigns && !showCalendar && !showAnalytics && !showArchives && entities.find(e => e.name === activeEntity) && (
+            <div style={{ display: 'flex', gap: '8px', borderRight: '2px solid #FED7AA', paddingRight: '16px', marginRight: '8px' }}>
+              <button onClick={() => setOperationType('email')} style={{ ...styles.tab, ...(operationType === 'email' ? styles.tabActive : {}) }}>📧 Email</button>
+              <button onClick={() => setOperationType('slider')} style={{ ...styles.tab, ...(operationType === 'slider' ? styles.tabActive : {}) }}>🖼️ Slider</button>
+              <button onClick={() => setOperationType('social')} style={{ ...styles.tab, ...(operationType === 'social' ? styles.tabActive : {}) }}>📱 Réseaux sociaux</button>
+            </div>
+          )}
+          
+          {/* Tabs des entités */}
           {entities.map(entity => (
-            <button key={entity.id} onClick={() => { setActiveEntity(entity.name); setShowAnalytics(false); setShowCalendar(false); setShowCampaigns(false); }} style={{ ...styles.tab, ...(activeEntity === entity.name && !showAnalytics && !showCalendar && !showCampaigns ? styles.tabActive : {}) }}>{entity.name}</button>
+            <button key={entity.id} onClick={() => { setActiveEntity(entity.name); setShowAnalytics(false); setShowCalendar(false); setShowCampaigns(false); setShowArchives(false); }} style={{ ...styles.tab, ...(activeEntity === entity.name && !showAnalytics && !showCalendar && !showCampaigns && !showArchives ? styles.tabActive : {}) }}>{entity.name}</button>
           ))}
-          <button onClick={() => { setShowCampaigns(true); setShowAnalytics(false); setShowCalendar(false); }} style={{ ...styles.tab, ...(showCampaigns ? styles.tabActive : {}), display: 'flex', alignItems: 'center', gap: '8px' }}><FolderOpen size={18} />Campagnes</button>
-          <button onClick={() => { setShowCalendar(true); setShowAnalytics(false); setShowCampaigns(false); }} style={{ ...styles.tab, ...(showCalendar ? styles.tabActive : {}), display: 'flex', alignItems: 'center', gap: '8px' }}><CalendarIcon size={18} />Calendrier</button>
-          <button onClick={() => { setShowAnalytics(true); setShowCalendar(false); setShowCampaigns(false); }} style={{ ...styles.tab, ...(showAnalytics ? styles.tabActive : {}), display: 'flex', alignItems: 'center', gap: '8px' }}><TrendingUp size={18} />Analytics</button>
+          <button onClick={() => { setShowCampaigns(true); setShowAnalytics(false); setShowCalendar(false); setShowArchives(false); }} style={{ ...styles.tab, ...(showCampaigns ? styles.tabActive : {}), display: 'flex', alignItems: 'center', gap: '8px' }}><FolderOpen size={18} />Campagnes</button>
+          <button onClick={() => { setShowArchives(true); setShowCampaigns(false); setShowAnalytics(false); setShowCalendar(false); }} style={{ ...styles.tab, ...(showArchives ? styles.tabActive : {}), display: 'flex', alignItems: 'center', gap: '8px' }}><Archive size={18} />Archives</button>
+          <button onClick={() => { setShowCalendar(true); setShowAnalytics(false); setShowCampaigns(false); setShowArchives(false); }} style={{ ...styles.tab, ...(showCalendar ? styles.tabActive : {}), display: 'flex', alignItems: 'center', gap: '8px' }}><CalendarIcon size={18} />Calendrier</button>
+          <button onClick={() => { setShowAnalytics(true); setShowCalendar(false); setShowCampaigns(false); setShowArchives(false); }} style={{ ...styles.tab, ...(showAnalytics ? styles.tabActive : {}), display: 'flex', alignItems: 'center', gap: '8px' }}><TrendingUp size={18} />Analytics</button>
           <button onClick={addEntity} style={{ ...styles.tab, fontSize: '20px' }}>+</button>
         </div>
       </div>
 
       {/* Main Content */}
       <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '30px 40px' }}>
-        {showCampaigns ? <CampaignsView entities={entities} /> : showCalendar ? <CalendarView entities={entities} /> : showAnalytics ? <AnalyticsView entities={entities} /> : (
+        {showCampaigns ? (
+          <CampaignsView entities={entities} />
+        ) : showArchives ? (
+          <ArchivesView entities={entities} />
+        ) : showCalendar ? (
+          <CalendarView entities={entities} onOperationClick={setSelectedOperation} />
+        ) : showAnalytics ? (
+          <AnalyticsView entities={entities} />
+        ) : (
           <>
             {/* Filtres */}
             <div style={styles.filterCard}>
@@ -261,6 +342,10 @@ const EmailManagementTool = () => {
                   <input type="checkbox" checked={filters.pasDansSRE} onChange={(e) => setFilters({ ...filters, pasDansSRE: e.target.checked })} style={{ width: '18px', height: '18px', accentColor: '#F97316' }} />
                   <span style={{ fontSize: '14px', fontWeight: '500' }}>Pas dans SRE</span>
                 </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={filters.archives} onChange={(e) => setFilters({ ...filters, archives: e.target.checked })} style={{ width: '18px', height: '18px', accentColor: '#F97316' }} />
+                  <span style={{ fontSize: '14px', fontWeight: '500' }}>Archives</span>
+                </label>
                 <input type="text" placeholder="Thématique..." value={filters.thematique} onChange={(e) => setFilters({ ...filters, thematique: e.target.value })} style={{ padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} />
                 <select value={filters.langue} onChange={(e) => setFilters({ ...filters, langue: e.target.value })} style={{ padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }}>
                   <option value="">Toutes langues</option>
@@ -270,65 +355,114 @@ const EmailManagementTool = () => {
                   <option value="ES">ES</option>
                   <option value="IT">IT</option>
                 </select>
-                <input type="date" value={filters.dateDebut} onChange={(e) => setFilters({ ...filters, dateDebut: e.target.value })} style={{ padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} />
-                <input type="date" value={filters.dateFin} onChange={(e) => setFilters({ ...filters, dateFin: e.target.value })} style={{ padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} />
+                <input type="date" placeholder="Date début" value={filters.dateDebut} onChange={(e) => setFilters({ ...filters, dateDebut: e.target.value })} style={{ padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} />
+                <input type="date" placeholder="Date fin" value={filters.dateFin} onChange={(e) => setFilters({ ...filters, dateFin: e.target.value })} style={{ padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} />
               </div>
-              <button onClick={() => setFilters({ creaRealisee: false, batValide: false, dansSRE: false, pasDansSRE: false, archives: false, thematique: '', langue: '', dateDebut: '', dateFin: '' })} style={{ marginTop: '16px', color: '#F97316', border: 'none', background: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: '600' }}>Réinitialiser les filtres</button>
             </div>
 
-            {/* Liste opérations */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {loading ? (
-                <div style={{ ...styles.card, textAlign: 'center', padding: '60px' }}>
-                  <div style={{ fontSize: '48px', marginBottom: '16px' }}>⏳</div>
-                  <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#1F2937' }}>Chargement...</h3>
-                </div>
-              ) : getFilteredOperations().length === 0 ? (
-                <div style={{ ...styles.card, textAlign: 'center', padding: '60px' }}>
-                  <div style={{ fontSize: '48px', marginBottom: '16px' }}>{operationType === 'email' ? '📧' : '🖼️'}</div>
-                  <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#1F2937' }}>Aucun{operationType === 'email' ? ' email' : 'e slider'}</h3>
-                </div>
-              ) : (
-                getFilteredOperations().map(operation => (
-                  <OperationCard key={operation.id} operation={operation} onUpdate={(updates) => updateOperation(operation.id, updates)} onDelete={() => deleteOperation(operation.id)} onArchive={() => archiveOperation(operation.id)} onUnarchive={() => unarchiveOperation(operation.id)} alert={getAlertStatus(operation.date_envoi)} messageTemplates={messageTemplates} copyMessageToClipboard={copyMessageToClipboard} copiedMessageId={copiedMessageId} styles={styles} />
-                ))
-              )}
-            </div>
+            {/* Liste des opérations */}
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '60px' }}>
+                <div style={{ fontSize: '48px', marginBottom: '16px' }}>⏳</div>
+                <div style={{ fontSize: '18px', color: '#6B7280' }}>Chargement...</div>
+              </div>
+            ) : getFilteredOperations().length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '60px', backgroundColor: 'white', borderRadius: '12px', border: '2px solid #FED7AA' }}>
+                <div style={{ fontSize: '48px', marginBottom: '16px' }}>📭</div>
+                <div style={{ fontSize: '18px', color: '#6B7280' }}>Aucune opération trouvée</div>
+              </div>
+            ) : (
+              getFilteredOperations().map(operation => (
+                <OperationCard 
+                  key={operation.id} 
+                  operation={operation} 
+                  onUpdate={(updates) => updateOperation(operation.id, updates)} 
+                  onDelete={() => deleteOperation(operation.id)} 
+                  onArchive={() => archiveOperation(operation.id)} 
+                  onUnarchive={() => unarchiveOperation(operation.id)} 
+                  getAlertStatus={getAlertStatus} 
+                  messageTemplates={messageTemplates} 
+                  copyMessageToClipboard={copyMessageToClipboard} 
+                  copiedMessageId={copiedMessageId} 
+                />
+              ))
+            )}
           </>
         )}
       </div>
 
+      {/* Modals */}
       {showAddModal && <AddOperationModal operationType={operationType} onClose={() => setShowAddModal(false)} onAdd={addOperation} styles={styles} />}
       {showImportModal && <ImportCSVModal onClose={() => setShowImportModal(false)} onImport={handleCSVImport} styles={styles} />}
+      {selectedOperation && <OperationDetailModal operation={selectedOperation} onClose={() => setSelectedOperation(null)} styles={styles} />}
     </div>
   );
 };
 
-const OperationCard = ({ operation, onUpdate, onDelete, onArchive, onUnarchive, alert, messageTemplates, copyMessageToClipboard, copiedMessageId, styles }) => {
+// Composant de carte d'opération
+const OperationCard = ({ operation, onUpdate, onDelete, onArchive, onUnarchive, getAlertStatus, messageTemplates, copyMessageToClipboard, copiedMessageId }) => {
   const [expanded, setExpanded] = useState(false);
   const [showProductModal, setShowProductModal] = useState(false);
-  const hasTemplate = (triggerEvent) => messageTemplates && messageTemplates.some(t => t.trigger_event === triggerEvent);
-  const addProduct = async (product) => { const updatedProducts = [...(operation.produits || []), product]; onUpdate({ produits: updatedProducts }); setShowProductModal(false); };
-  const removeProduct = async (index) => { const updatedProducts = (operation.produits || []).filter((_, i) => i !== index); onUpdate({ produits: updatedProducts }); };
+  const alertStatus = getAlertStatus(operation.date_envoi);
+  const hasTemplate = (event) => messageTemplates.some(t => t.trigger_event === event);
+  
+  const addProduct = (product) => {
+    const updatedProducts = [...(operation.produits || []), product];
+    onUpdate({ produits: updatedProducts });
+    setShowProductModal(false);
+  };
+  
+  const removeProduct = (index) => {
+    const updatedProducts = (operation.produits || []).filter((_, i) => i !== index);
+    onUpdate({ produits: updatedProducts });
+  };
+
+  const getTypeIcon = () => {
+    if (operation.type === 'email') return '📧';
+    if (operation.type === 'slider') return '🖼️';
+    if (operation.type === 'social') return '📱';
+    return '📄';
+  };
+
+  const getSocialIcon = (reseau) => {
+    const icons = {
+      'Facebook': '🔵',
+      'Instagram': '🟣',
+      'TikTok': '⚫',
+      'LinkedIn': '🔷',
+      'Twitter': '🐦'
+    };
+    return icons[reseau] || '📱';
+  };
 
   return (
-    <div style={styles.card}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '20px' }}>
+    <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '24px', border: '2px solid #FED7AA', marginBottom: '16px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: expanded ? '16px' : '0' }}>
         <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+            <span style={{ fontSize: '24px' }}>{getTypeIcon()}</span>
             <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#1F2937', margin: 0 }}>{operation.titre}</h3>
-            {alert.show && <span style={{ backgroundColor: '#FDE047', color: '#78350F', fontSize: '12px', padding: '4px 12px', borderRadius: '999px', fontWeight: '700' }}>À ajouter au planning SRE</span>}
-            {operation.archived && <span style={{ backgroundColor: '#D1D5DB', color: '#4B5563', fontSize: '12px', padding: '4px 12px', borderRadius: '999px', fontWeight: '600' }}>Archivé</span>}
+            {operation.type === 'social' && operation.reseau_social && (
+              <span style={{ fontSize: '16px' }}>{getSocialIcon(operation.reseau_social)}</span>
+            )}
+            <span style={{ fontSize: '14px', backgroundColor: '#FEF3C7', color: '#92400E', padding: '4px 12px', borderRadius: '12px', fontWeight: '600' }}>{operation.langue}</span>
+            {alertStatus.show && (
+              <span style={{ fontSize: '14px', backgroundColor: '#FEE2E2', color: '#991B1B', padding: '4px 12px', borderRadius: '12px', fontWeight: '600' }}>⚠️ J-{alertStatus.days}</span>
+            )}
           </div>
-          <div style={{ display: 'flex', gap: '16px', fontSize: '14px', color: '#6B7280' }}>
+          <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', fontSize: '14px', color: '#6B7280' }}>
             <span>📅 {new Date(operation.date_envoi).toLocaleDateString('fr-FR')}</span>
             {operation.thematique && <span>🏷️ {operation.thematique}</span>}
-            <span>🌐 {operation.langue}</span>
+            {operation.type === 'slider' && operation.position_slider && <span>📍 {operation.position_slider}</span>}
+            {operation.type === 'social' && operation.reseau_social && <span>🌐 {operation.reseau_social}</span>}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          {!operation.archived && <button onClick={() => onArchive()} style={{ padding: '8px', border: 'none', background: 'none', cursor: 'pointer' }}><Archive size={18} color="#6B7280" /></button>}
-          {operation.archived && <button onClick={() => onUnarchive()} style={{ padding: '8px', border: 'none', background: 'none', cursor: 'pointer' }}><ArchiveRestore size={18} color="#10B981" /></button>}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {operation.archived ? (
+            <button onClick={() => onUnarchive()} style={{ padding: '8px', border: 'none', background: 'none', cursor: 'pointer' }}><ArchiveRestore size={18} color="#10B981" /></button>
+          ) : (
+            <button onClick={() => onArchive()} style={{ padding: '8px', border: 'none', background: 'none', cursor: 'pointer' }}><Archive size={18} color="#F97316" /></button>
+          )}
           <button onClick={() => onDelete()} style={{ padding: '8px', border: 'none', background: 'none', cursor: 'pointer' }}><Trash2 size={18} color="#EF4444" /></button>
           <button onClick={() => setExpanded(!expanded)} style={{ padding: '8px', border: 'none', background: 'none', cursor: 'pointer', fontSize: '18px', color: '#F97316' }}>{expanded ? '▲' : '▼'}</button>
         </div>
@@ -379,8 +513,27 @@ const OperationCard = ({ operation, onUpdate, onDelete, onArchive, onUnarchive, 
               <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Objet</label><input type="text" value={operation.objet || ''} onChange={(e) => onUpdate({ objet: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} /></div>
               <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Pre-header</label><input type="text" value={operation.preheader || ''} onChange={(e) => onUpdate({ preheader: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} /></div>
               <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Corps</label><textarea value={operation.corps || ''} onChange={(e) => onUpdate({ corps: e.target.value })} rows="4" style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} /></div>
+              
+              {/* Liens SDLM multi-langues */}
+              <div style={{ backgroundColor: '#FFF7ED', padding: '16px', borderRadius: '8px', marginTop: '12px' }}>
+                <label style={{ display: 'block', fontSize: '16px', fontWeight: '700', marginBottom: '16px', color: '#F97316' }}>🔗 Liens SDLM (Structure du mail)</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>🇫🇷 Lien SDLM FR</label>
+                    <input type="url" value={operation.lien_sdlm_fr || ''} onChange={(e) => onUpdate({ lien_sdlm_fr: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} placeholder="https://..." />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>🇩🇪 Lien SDLM DE</label>
+                    <input type="url" value={operation.lien_sdlm_de || ''} onChange={(e) => onUpdate({ lien_sdlm_de: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} placeholder="https://..." />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>🇪🇸 Lien SDLM ES</label>
+                    <input type="url" value={operation.lien_sdlm_es || ''} onChange={(e) => onUpdate({ lien_sdlm_es: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} placeholder="https://..." />
+                  </div>
+                </div>
+              </div>
             </div>
-          ) : (
+          ) : operation.type === 'slider' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Titre slider</label><input type="text" value={operation.titre_slider || ''} onChange={(e) => onUpdate({ titre_slider: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} /></div>
               <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Sous-titre</label><input type="text" value={operation.sous_titre_slider || ''} onChange={(e) => onUpdate({ sous_titre_slider: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} /></div>
@@ -389,7 +542,14 @@ const OperationCard = ({ operation, onUpdate, onDelete, onArchive, onUnarchive, 
               <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>URL image</label><input type="url" value={operation.image_url || ''} onChange={(e) => onUpdate({ image_url: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} /></div>
               <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Position</label><select value={operation.position_slider || 'homepage'} onChange={(e) => onUpdate({ position_slider: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }}><option value="homepage">Homepage</option><option value="category">Catégorie</option><option value="product">Produit</option><option value="landing">Landing</option></select></div>
             </div>
-          )}
+          ) : operation.type === 'social' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Réseau social</label><select value={operation.reseau_social || 'Facebook'} onChange={(e) => onUpdate({ reseau_social: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }}><option value="Facebook">🔵 Facebook</option><option value="Instagram">🟣 Instagram</option><option value="TikTok">⚫ TikTok</option><option value="LinkedIn">🔷 LinkedIn</option><option value="Twitter">🐦 Twitter</option></select></div>
+              <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Texte de la publication</label><textarea value={operation.texte_publication || ''} onChange={(e) => onUpdate({ texte_publication: e.target.value })} rows="4" style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} placeholder="Écrivez le texte de votre publication..." /></div>
+              <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Lien de la publication</label><input type="url" value={operation.lien_publication || ''} onChange={(e) => onUpdate({ lien_publication: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} placeholder="https://..." /></div>
+            </div>
+          ) : null}
+          
           <div style={{ marginTop: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
               <label style={{ fontSize: '14px', fontWeight: '600' }}>Produits</label>
@@ -409,7 +569,7 @@ const OperationCard = ({ operation, onUpdate, onDelete, onArchive, onUnarchive, 
           </div>
         </div>
       )}
-      {showProductModal && <ProductModal onClose={() => setShowProductModal(false)} onAdd={addProduct} styles={styles} />}
+      {showProductModal && <ProductModal onClose={() => setShowProductModal(false)} onAdd={addProduct} styles={{ button: { backgroundColor: '#F97316', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: '600' }, buttonSecondary: { backgroundColor: 'white', color: '#F97316', border: '2px solid #F97316', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: '600' } }} />}
     </div>
   );
 };
@@ -436,18 +596,21 @@ const ProductModal = ({ onClose, onAdd, styles }) => {
 };
 
 const AddOperationModal = ({ operationType, onClose, onAdd, styles }) => {
-  const [formData, setFormData] = useState({ dateEnvoi: '', titre: '', thematique: '', langue: 'FR', brief: '', position_slider: 'homepage' });
+  const [formData, setFormData] = useState({ dateEnvoi: '', titre: '', thematique: '', langue: 'FR', brief: '', position_slider: 'homepage', reseau_social: 'Facebook' });
   const handleSubmit = () => { if (!formData.dateEnvoi || !formData.titre) { alert('Date et titre requis'); return; } onAdd(formData); };
   return (
     <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }} onClick={onClose}>
       <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '32px', maxWidth: '500px', width: '100%', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
-        <h2 style={{ fontSize: '24px', fontWeight: '700', color: '#F97316', marginBottom: '24px' }}>Nouvelle opération</h2>
+        <h2 style={{ fontSize: '24px', fontWeight: '700', color: '#F97316', marginBottom: '24px' }}>
+          Nouvelle opération {operationType === 'email' ? '📧 Email' : operationType === 'slider' ? '🖼️ Slider' : '📱 Réseaux sociaux'}
+        </h2>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Date d'envoi *</label><input type="date" value={formData.dateEnvoi} onChange={(e) => setFormData({ ...formData, dateEnvoi: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} /></div>
           <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Titre *</label><input type="text" value={formData.titre} onChange={(e) => setFormData({ ...formData, titre: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} placeholder="Ex: Saint Valentin 2024" /></div>
           <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Thématique</label><input type="text" value={formData.thematique} onChange={(e) => setFormData({ ...formData, thematique: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} placeholder="Ex: Promotion" /></div>
           <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Langue</label><select value={formData.langue} onChange={(e) => setFormData({ ...formData, langue: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }}><option value="FR">FR</option><option value="EN">EN</option><option value="DE">DE</option><option value="ES">ES</option><option value="IT">IT</option></select></div>
           {operationType === 'slider' && <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Position</label><select value={formData.position_slider} onChange={(e) => setFormData({ ...formData, position_slider: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }}><option value="homepage">Homepage</option><option value="category">Catégorie</option><option value="product">Produit</option><option value="landing">Landing</option></select></div>}
+          {operationType === 'social' && <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Réseau social</label><select value={formData.reseau_social} onChange={(e) => setFormData({ ...formData, reseau_social: e.target.value })} style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }}><option value="Facebook">🔵 Facebook</option><option value="Instagram">🟣 Instagram</option><option value="TikTok">⚫ TikTok</option><option value="LinkedIn">🔷 LinkedIn</option><option value="Twitter">🐦 Twitter</option></select></div>}
           <div><label style={{ display: 'block', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Brief</label><textarea value={formData.brief} onChange={(e) => setFormData({ ...formData, brief: e.target.value })} rows="3" style={{ width: '100%', padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} /></div>
         </div>
         <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
@@ -465,86 +628,320 @@ const ImportCSVModal = ({ onClose, onImport, styles }) => (
       <h2 style={{ fontSize: '24px', fontWeight: '700', color: '#F97316', marginBottom: '24px' }}>Importer CSV</h2>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         <p style={{ fontSize: '14px', color: '#6B7280' }}>Colonnes requises : dateenvoi, titre</p>
-        <p style={{ fontSize: '14px', color: '#6B7280' }}>Colonnes optionnelles : thematique, langue, brief</p>
+        <p style={{ fontSize: '14px', color: '#6B7280' }}>Colonnes optionnelles : thematique, langue, brief, position, reseau</p>
         <input type="file" accept=".csv" onChange={onImport} style={{ padding: '10px 14px', border: '1px solid #FED7AA', borderRadius: '8px', fontSize: '14px' }} />
       </div>
-      <button onClick={onClose} style={{ ...styles.buttonSecondary, width: '100%', marginTop: '24px' }}>Fermer</button>
+      <button onClick={onClose} style={{ ...styles.buttonSecondary, marginTop: '24px' }}>Fermer</button>
     </div>
   </div>
 );
 
+// Popup de détails de l'opération
+const OperationDetailModal = ({ operation, onClose, styles }) => {
+  const getTypeIcon = () => {
+    if (operation.type === 'email') return '📧';
+    if (operation.type === 'slider') return '🖼️';
+    if (operation.type === 'social') return '📱';
+    return '📄';
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }} onClick={onClose}>
+      <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '32px', maxWidth: '700px', width: '100%', maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
+          <span style={{ fontSize: '32px' }}>{getTypeIcon()}</span>
+          <h2 style={{ fontSize: '28px', fontWeight: '700', color: '#F97316', margin: 0 }}>{operation.titre}</h2>
+        </div>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '24px' }}>
+          <div style={{ padding: '16px', backgroundColor: '#FFF7ED', borderRadius: '8px' }}>
+            <div style={{ fontSize: '12px', color: '#6B7280', marginBottom: '4px' }}>Date d'envoi</div>
+            <div style={{ fontSize: '16px', fontWeight: '600' }}>📅 {new Date(operation.date_envoi).toLocaleDateString('fr-FR')}</div>
+          </div>
+          <div style={{ padding: '16px', backgroundColor: '#FFF7ED', borderRadius: '8px' }}>
+            <div style={{ fontSize: '12px', color: '#6B7280', marginBottom: '4px' }}>Langue</div>
+            <div style={{ fontSize: '16px', fontWeight: '600' }}>{operation.langue}</div>
+          </div>
+          {operation.thematique && (
+            <div style={{ padding: '16px', backgroundColor: '#FFF7ED', borderRadius: '8px' }}>
+              <div style={{ fontSize: '12px', color: '#6B7280', marginBottom: '4px' }}>Thématique</div>
+              <div style={{ fontSize: '16px', fontWeight: '600' }}>🏷️ {operation.thematique}</div>
+            </div>
+          )}
+          {operation.type === 'social' && operation.reseau_social && (
+            <div style={{ padding: '16px', backgroundColor: '#FFF7ED', borderRadius: '8px' }}>
+              <div style={{ fontSize: '12px', color: '#6B7280', marginBottom: '4px' }}>Réseau social</div>
+              <div style={{ fontSize: '16px', fontWeight: '600' }}>🌐 {operation.reseau_social}</div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ padding: '16px', backgroundColor: '#F3F4F6', borderRadius: '8px', marginBottom: '24px' }}>
+          <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px', color: '#1F2937' }}>Statut</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {operation.crea_realisee ? <Check size={18} color="#10B981" /> : <X size={18} color="#EF4444" />}
+              <span style={{ fontSize: '14px' }}>Créa réalisée</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {operation.bat_envoye_eric ? <Check size={18} color="#10B981" /> : <X size={18} color="#EF4444" />}
+              <span style={{ fontSize: '14px' }}>BAT Eric</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {operation.bat_envoye_marketing ? <Check size={18} color="#10B981" /> : <X size={18} color="#EF4444" />}
+              <span style={{ fontSize: '14px' }}>BAT Marketing</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {operation.bat_valide ? <Check size={18} color="#10B981" /> : <X size={18} color="#EF4444" />}
+              <span style={{ fontSize: '14px' }}>BAT validé</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {operation.dans_planning_sre ? <Check size={18} color="#10B981" /> : <X size={18} color="#EF4444" />}
+              <span style={{ fontSize: '14px' }}>Dans planning SRE</span>
+            </div>
+          </div>
+        </div>
+
+        {operation.brief && (
+          <div style={{ padding: '16px', backgroundColor: '#F3F4F6', borderRadius: '8px', marginBottom: '24px' }}>
+            <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '8px', color: '#1F2937' }}>Brief</div>
+            <div style={{ fontSize: '14px', color: '#6B7280', whiteSpace: 'pre-wrap' }}>{operation.brief}</div>
+          </div>
+        )}
+
+        {operation.type === 'email' && (
+          <>
+            {(operation.objet || operation.preheader || operation.corps) && (
+              <div style={{ padding: '16px', backgroundColor: '#DBEAFE', borderRadius: '8px', marginBottom: '16px' }}>
+                <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px', color: '#1F2937' }}>📧 Contenu Email</div>
+                {operation.objet && <div style={{ marginBottom: '8px' }}><span style={{ fontWeight: '600' }}>Objet:</span> {operation.objet}</div>}
+                {operation.preheader && <div style={{ marginBottom: '8px' }}><span style={{ fontWeight: '600' }}>Pre-header:</span> {operation.preheader}</div>}
+                {operation.corps && <div style={{ whiteSpace: 'pre-wrap' }}><span style={{ fontWeight: '600' }}>Corps:</span> {operation.corps}</div>}
+              </div>
+            )}
+            
+            {(operation.lien_sdlm_fr || operation.lien_sdlm_de || operation.lien_sdlm_es) && (
+              <div style={{ padding: '16px', backgroundColor: '#FFF7ED', borderRadius: '8px', marginBottom: '16px' }}>
+                <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px', color: '#F97316' }}>🔗 Liens SDLM</div>
+                {operation.lien_sdlm_fr && (
+                  <div style={{ marginBottom: '8px' }}>
+                    <div style={{ fontWeight: '600', marginBottom: '4px' }}>🇫🇷 Français</div>
+                    <a href={operation.lien_sdlm_fr} target="_blank" rel="noopener noreferrer" style={{ fontSize: '14px', color: '#3B82F6', wordBreak: 'break-all' }}>{operation.lien_sdlm_fr}</a>
+                  </div>
+                )}
+                {operation.lien_sdlm_de && (
+                  <div style={{ marginBottom: '8px' }}>
+                    <div style={{ fontWeight: '600', marginBottom: '4px' }}>🇩🇪 Allemand</div>
+                    <a href={operation.lien_sdlm_de} target="_blank" rel="noopener noreferrer" style={{ fontSize: '14px', color: '#3B82F6', wordBreak: 'break-all' }}>{operation.lien_sdlm_de}</a>
+                  </div>
+                )}
+                {operation.lien_sdlm_es && (
+                  <div style={{ marginBottom: '8px' }}>
+                    <div style={{ fontWeight: '600', marginBottom: '4px' }}>🇪🇸 Espagnol</div>
+                    <a href={operation.lien_sdlm_es} target="_blank" rel="noopener noreferrer" style={{ fontSize: '14px', color: '#3B82F6', wordBreak: 'break-all' }}>{operation.lien_sdlm_es}</a>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {operation.type === 'slider' && (
+          <div style={{ padding: '16px', backgroundColor: '#F3E8FF', borderRadius: '8px', marginBottom: '16px' }}>
+            <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px', color: '#1F2937' }}>🖼️ Contenu Slider</div>
+            {operation.titre_slider && <div style={{ marginBottom: '8px' }}><span style={{ fontWeight: '600' }}>Titre:</span> {operation.titre_slider}</div>}
+            {operation.sous_titre_slider && <div style={{ marginBottom: '8px' }}><span style={{ fontWeight: '600' }}>Sous-titre:</span> {operation.sous_titre_slider}</div>}
+            {operation.texte_bouton && <div style={{ marginBottom: '8px' }}><span style={{ fontWeight: '600' }}>Texte bouton:</span> {operation.texte_bouton}</div>}
+            {operation.lien_bouton && <div style={{ marginBottom: '8px' }}><span style={{ fontWeight: '600' }}>Lien:</span> <a href={operation.lien_bouton} target="_blank" rel="noopener noreferrer" style={{ color: '#3B82F6' }}>{operation.lien_bouton}</a></div>}
+            {operation.position_slider && <div><span style={{ fontWeight: '600' }}>Position:</span> {operation.position_slider}</div>}
+          </div>
+        )}
+
+        {operation.type === 'social' && (
+          <div style={{ padding: '16px', backgroundColor: '#E0F2FE', borderRadius: '8px', marginBottom: '16px' }}>
+            <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px', color: '#1F2937' }}>📱 Publication Réseaux Sociaux</div>
+            {operation.reseau_social && <div style={{ marginBottom: '8px' }}><span style={{ fontWeight: '600' }}>Réseau:</span> {operation.reseau_social}</div>}
+            {operation.texte_publication && <div style={{ marginBottom: '8px', whiteSpace: 'pre-wrap' }}><span style={{ fontWeight: '600' }}>Texte:</span><br />{operation.texte_publication}</div>}
+            {operation.lien_publication && <div><span style={{ fontWeight: '600' }}>Lien:</span> <a href={operation.lien_publication} target="_blank" rel="noopener noreferrer" style={{ color: '#3B82F6', wordBreak: 'break-all' }}>{operation.lien_publication}</a></div>}
+          </div>
+        )}
+
+        {operation.produits && operation.produits.length > 0 && (
+          <div style={{ padding: '16px', backgroundColor: '#F3E8FF', borderRadius: '8px', marginBottom: '16px' }}>
+            <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px', color: '#1F2937' }}>🛍️ Produits ({operation.produits.length})</div>
+            {operation.produits.map((product, index) => (
+              <div key={index} style={{ marginBottom: '8px', paddingBottom: '8px', borderBottom: index < operation.produits.length - 1 ? '1px solid #E5E7EB' : 'none' }}>
+                <div style={{ fontWeight: '600' }}>{product.libelle}</div>
+                {product.url && <a href={product.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '12px', color: '#3B82F6' }}>{product.url}</a>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button onClick={onClose} style={{ ...styles.button, width: '100%', justifyContent: 'center' }}>Fermer</button>
+      </div>
+    </div>
+  );
+};
+
+// Vue Campagnes avec suppression
 const CampaignsView = ({ entities }) => {
   const [campaigns, setCampaigns] = useState([]);
-  const [selectedCampaign, setSelectedCampaign] = useState(null);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { loadCampaigns(); }, [entities]);
-  const loadCampaigns = async () => { setLoading(true); const { data, error } = await supabase.from('campaigns').select('*, entities(name), operations(*)').order('date_debut', { ascending: false }); if (!handleSupabaseError(error)) setCampaigns(data || []); setLoading(false); };
-  const getCampaignStats = (campaign) => { const ops = campaign.operations || []; const total = ops.length; const validated = ops.filter(op => op.bat_valide).length; const percentage = total > 0 ? Math.round((validated / total) * 100) : 0; return { total, validated, percentage }; };
 
-  if (selectedCampaign) {
-    return (
-      <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '32px', border: '2px solid #FED7AA' }}>
-        <button onClick={() => setSelectedCampaign(null)} style={{ backgroundColor: 'white', color: '#F97316', border: '2px solid #F97316', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', marginBottom: '24px' }}>← Retour</button>
-        <h2 style={{ fontSize: '32px', fontWeight: '700', color: '#F97316', marginBottom: '16px' }}>📂 {selectedCampaign.name}</h2>
-        {selectedCampaign.description && <p style={{ color: '#6B7280', marginBottom: '24px' }}>{selectedCampaign.description}</p>}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '32px' }}>
-          <div style={{ backgroundColor: '#FFF7ED', padding: '20px', borderRadius: '12px' }}><div style={{ fontSize: '32px', fontWeight: '700', color: '#F97316' }}>{selectedCampaign.operations.length}</div><div style={{ fontSize: '14px', color: '#6B7280' }}>Opérations</div></div>
-          <div style={{ backgroundColor: '#DBEAFE', padding: '20px', borderRadius: '12px' }}><div style={{ fontSize: '32px', fontWeight: '700', color: '#3B82F6' }}>{selectedCampaign.operations.filter(o => o.type === 'email').length}</div><div style={{ fontSize: '14px', color: '#6B7280' }}>Emails</div></div>
-          <div style={{ backgroundColor: '#F3E8FF', padding: '20px', borderRadius: '12px' }}><div style={{ fontSize: '32px', fontWeight: '700', color: '#A855F7' }}>{selectedCampaign.operations.filter(o => o.type === 'slider').length}</div><div style={{ fontSize: '14px', color: '#6B7280' }}>Sliders</div></div>
+  useEffect(() => { loadCampaigns(); }, []);
+
+  const loadCampaigns = async () => {
+    setLoading(true);
+    const { data, error } = await supabase.from('campaigns').select('*').eq('archived', false).order('start_date', { ascending: false });
+    if (!handleSupabaseError(error)) setCampaigns(data || []);
+    setLoading(false);
+  };
+
+  const deleteCampaign = async (campaignId) => {
+    if (window.confirm('⚠️ Supprimer cette campagne définitivement ?')) {
+      const { error } = await supabase.from('campaigns').delete().eq('id', campaignId);
+      if (!handleSupabaseError(error)) loadCampaigns();
+    }
+  };
+
+  const archiveCampaign = async (campaignId) => {
+    if (window.confirm('📦 Archiver cette campagne ?')) {
+      const { error } = await supabase.from('campaigns').update({ archived: true, archived_at: new Date().toISOString() }).eq('id', campaignId);
+      if (!handleSupabaseError(error)) loadCampaigns();
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '32px', border: '2px solid #FED7AA', marginBottom: '24px' }}>
+        <h2 style={{ fontSize: '28px', fontWeight: '700', color: '#F97316', marginBottom: '8px' }}>📁 Campagnes</h2>
+        <p style={{ fontSize: '14px', color: '#6B7280' }}>Gérez vos campagnes marketing</p>
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '40px' }}>Chargement...</div>
+      ) : campaigns.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '60px', backgroundColor: 'white', borderRadius: '12px', border: '2px solid #FED7AA' }}>
+          <div style={{ fontSize: '48px', marginBottom: '16px' }}>📭</div>
+          <div style={{ fontSize: '18px', color: '#6B7280' }}>Aucune campagne</div>
         </div>
-        <div style={{ fontSize: '14px', color: '#6B7280', marginBottom: '32px' }}>📅 Du {new Date(selectedCampaign.date_debut).toLocaleDateString('fr-FR')} au {new Date(selectedCampaign.date_fin).toLocaleDateString('fr-FR')}</div>
-        <h3 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '16px' }}>Timeline</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {selectedCampaign.operations.sort((a, b) => new Date(a.date_envoi) - new Date(b.date_envoi)).map(op => (
-            <div key={op.id} style={{ backgroundColor: '#F9FAFB', padding: '16px', borderRadius: '8px', border: '1px solid #E5E7EB' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <span style={{ fontSize: '24px' }}>{op.type === 'email' ? '📧' : '🖼️'}</span>
-                  <div><div style={{ fontWeight: '600' }}>{op.titre}</div><div style={{ fontSize: '14px', color: '#6B7280' }}>{new Date(op.date_envoi).toLocaleDateString('fr-FR')} • {op.langue}</div></div>
+      ) : (
+        <div style={{ display: 'grid', gap: '16px' }}>
+          {campaigns.map(campaign => (
+            <div key={campaign.id} style={{ backgroundColor: 'white', borderRadius: '12px', padding: '24px', border: '2px solid #FED7AA' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                <div style={{ flex: 1 }}>
+                  <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#1F2937', marginBottom: '8px' }}>{campaign.name}</h3>
+                  <div style={{ fontSize: '14px', color: '#6B7280' }}>
+                    📅 {new Date(campaign.start_date).toLocaleDateString('fr-FR')} → {new Date(campaign.end_date).toLocaleDateString('fr-FR')}
+                  </div>
+                  {campaign.description && <div style={{ fontSize: '14px', color: '#6B7280', marginTop: '8px' }}>{campaign.description}</div>}
                 </div>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                  {op.crea_realisee && <CheckCircle size={16} color="#10B981" />}
-                  {op.bat_valide && <CheckCircle size={16} color="#3B82F6" />}
-                  {op.dans_planning_sre && <CheckCircle size={16} color="#A855F7" />}
+                  <button onClick={() => archiveCampaign(campaign.id)} style={{ padding: '8px 16px', backgroundColor: '#FFF7ED', color: '#F97316', border: '2px solid #F97316', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Archive size={16} />Archiver
+                  </button>
+                  <button onClick={() => deleteCampaign(campaign.id)} style={{ padding: '8px 16px', backgroundColor: '#FEE2E2', color: '#DC2626', border: '2px solid #DC2626', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Trash2 size={16} />Supprimer
+                  </button>
                 </div>
               </div>
             </div>
           ))}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '32px', border: '2px solid #FED7AA' }}>
-      <h2 style={{ fontSize: '28px', fontWeight: '700', color: '#F97316', marginBottom: '24px' }}>📂 Mes Campagnes</h2>
-      {loading ? <div style={{ textAlign: 'center', padding: '40px' }}>Chargement...</div> : campaigns.length === 0 ? <div style={{ textAlign: 'center', padding: '40px', color: '#6B7280' }}>Aucune campagne</div> : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {campaigns.map(campaign => {
-            const stats = getCampaignStats(campaign);
-            return (
-              <div key={campaign.id} onClick={() => setSelectedCampaign(campaign)} style={{ padding: '24px', background: 'linear-gradient(135deg, #FFF7ED 0%, #FEE2E2 100%)', borderRadius: '12px', border: '2px solid #FED7AA', cursor: 'pointer', transition: 'all 0.2s' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '16px' }}>
-                  <div><h3 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>{campaign.name}</h3><div style={{ fontSize: '14px', color: '#6B7280' }}>{campaign.entities?.name} • {stats.total} opération(s)</div></div>
-                  <div style={{ textAlign: 'right' }}><div style={{ fontSize: '28px', fontWeight: '700', color: '#F97316' }}>{stats.percentage}%</div><div style={{ fontSize: '12px', color: '#6B7280' }}>{stats.validated}/{stats.total} validées</div></div>
-                </div>
-                <div style={{ width: '100%', backgroundColor: '#E5E7EB', height: '12px', borderRadius: '999px', marginBottom: '12px' }}><div style={{ background: 'linear-gradient(90deg, #F97316 0%, #EA580C 100%)', height: '12px', borderRadius: '999px', width: `${stats.percentage}%`, transition: 'width 0.3s' }}></div></div>
-                <div style={{ display: 'flex', gap: '16px', fontSize: '14px', color: '#6B7280', flexWrap: 'wrap' }}><span>📅 {new Date(campaign.date_debut).toLocaleDateString('fr-FR')}</span><span>→</span><span>{new Date(campaign.date_fin).toLocaleDateString('fr-FR')}</span></div>
-              </div>
-            );
-          })}
         </div>
       )}
     </div>
   );
 };
 
-const CalendarView = ({ entities }) => {
+// Vue Archives
+const ArchivesView = ({ entities }) => {
+  const [archivedCampaigns, setArchivedCampaigns] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { loadArchivedCampaigns(); }, []);
+
+  const loadArchivedCampaigns = async () => {
+    setLoading(true);
+    const { data, error } = await supabase.from('campaigns').select('*').eq('archived', true).order('archived_at', { ascending: false });
+    if (!handleSupabaseError(error)) setArchivedCampaigns(data || []);
+    setLoading(false);
+  };
+
+  const unarchiveCampaign = async (campaignId) => {
+    const { error } = await supabase.from('campaigns').update({ archived: false, archived_at: null }).eq('id', campaignId);
+    if (!handleSupabaseError(error)) loadArchivedCampaigns();
+  };
+
+  const deleteCampaign = async (campaignId) => {
+    if (window.confirm('⚠️ Supprimer définitivement cette campagne archivée ?')) {
+      const { error } = await supabase.from('campaigns').delete().eq('id', campaignId);
+      if (!handleSupabaseError(error)) loadArchivedCampaigns();
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '32px', border: '2px solid #FED7AA', marginBottom: '24px' }}>
+        <h2 style={{ fontSize: '28px', fontWeight: '700', color: '#F97316', marginBottom: '8px' }}>📦 Archives</h2>
+        <p style={{ fontSize: '14px', color: '#6B7280' }}>Campagnes archivées</p>
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '40px' }}>Chargement...</div>
+      ) : archivedCampaigns.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '60px', backgroundColor: 'white', borderRadius: '12px', border: '2px solid #FED7AA' }}>
+          <div style={{ fontSize: '48px', marginBottom: '16px' }}>📭</div>
+          <div style={{ fontSize: '18px', color: '#6B7280' }}>Aucune campagne archivée</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: '16px' }}>
+          {archivedCampaigns.map(campaign => (
+            <div key={campaign.id} style={{ backgroundColor: 'white', borderRadius: '12px', padding: '24px', border: '2px solid #FED7AA', opacity: 0.8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                <div style={{ flex: 1 }}>
+                  <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#1F2937', marginBottom: '8px' }}>{campaign.name}</h3>
+                  <div style={{ fontSize: '14px', color: '#6B7280' }}>
+                    📅 {new Date(campaign.start_date).toLocaleDateString('fr-FR')} → {new Date(campaign.end_date).toLocaleDateString('fr-FR')}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '4px' }}>
+                    Archivée le {new Date(campaign.archived_at).toLocaleDateString('fr-FR')}
+                  </div>
+                  {campaign.description && <div style={{ fontSize: '14px', color: '#6B7280', marginTop: '8px' }}>{campaign.description}</div>}
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button onClick={() => unarchiveCampaign(campaign.id)} style={{ padding: '8px 16px', backgroundColor: '#DCFCE7', color: '#10B981', border: '2px solid #10B981', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <ArchiveRestore size={16} />Restaurer
+                  </button>
+                  <button onClick={() => deleteCampaign(campaign.id)} style={{ padding: '8px 16px', backgroundColor: '#FEE2E2', color: '#DC2626', border: '2px solid #DC2626', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Trash2 size={16} />Supprimer
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Vue Calendrier avec popup
+const CalendarView = ({ entities, onOperationClick }) => {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [allOperations, setAllOperations] = useState([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { loadAllOperations(); }, [currentMonth]);
-  const loadAllOperations = async () => { setLoading(true); const startOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1); const endOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0); const { data, error } = await supabase.from('operations').select('*, entities(name)').gte('date_envoi', startOfMonth.toISOString().split('T')[0]).lte('date_envoi', endOfMonth.toISOString().split('T')[0]).order('date_envoi'); if (!handleSupabaseError(error)) setAllOperations(data || []); setLoading(false); };
+
+  useEffect(() => { loadAllOperations(); }, [entities, currentMonth]);
+
+  const loadAllOperations = async () => {
+    setLoading(true);
+    const { data, error } = await supabase.from('operations').select('*').eq('archived', false).order('date_envoi');
+    if (!handleSupabaseError(error)) setAllOperations(data || []);
+    setLoading(false);
+  };
+
   const getDaysInMonth = () => { const year = currentMonth.getFullYear(); const month = currentMonth.getMonth(); const firstDay = new Date(year, month, 1).getDay(); const daysInMonth = new Date(year, month + 1, 0).getDate(); const days = []; for (let i = 0; i < (firstDay === 0 ? 6 : firstDay - 1); i++) days.push(null); for (let i = 1; i <= daysInMonth; i++) days.push(i); return days; };
   const getOperationsForDay = (day) => { if (!day) return []; const dateStr = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`; return allOperations.filter(op => op.date_envoi === dateStr); };
   const monthNames = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
@@ -563,8 +960,9 @@ const CalendarView = ({ entities }) => {
             const ops = getOperationsForDay(day);
             const hasEmail = ops.some(op => op.type === 'email');
             const hasSlider = ops.some(op => op.type === 'slider');
+            const hasSocial = ops.some(op => op.type === 'social');
             return (
-              <div key={index} style={{ minHeight: '100px', padding: '8px', borderRadius: '8px', border: day ? '2px solid #FED7AA' : '2px solid transparent', backgroundColor: day ? 'white' : '#F9FAFB', cursor: day ? 'pointer' : 'default' }}>
+              <div key={index} style={{ minHeight: '120px', padding: '8px', borderRadius: '8px', border: day ? '2px solid #FED7AA' : '2px solid transparent', backgroundColor: day ? 'white' : '#F9FAFB', cursor: day && ops.length > 0 ? 'pointer' : 'default', transition: 'all 0.2s' }} onClick={() => { if (day && ops.length > 0) onOperationClick(ops[0]); }} onMouseEnter={(e) => { if (day && ops.length > 0) e.currentTarget.style.backgroundColor = '#FFF7ED'; }} onMouseLeave={(e) => { if (day) e.currentTarget.style.backgroundColor = 'white'; }}>
                 {day && (
                   <>
                     <div style={{ fontWeight: '600', color: '#1F2937', marginBottom: '8px' }}>{day}</div>
@@ -572,6 +970,7 @@ const CalendarView = ({ entities }) => {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                         {hasEmail && <div style={{ fontSize: '11px', backgroundColor: '#DBEAFE', color: '#1E40AF', padding: '4px 8px', borderRadius: '4px' }}>📧 {ops.filter(o => o.type === 'email').length}</div>}
                         {hasSlider && <div style={{ fontSize: '11px', backgroundColor: '#F3E8FF', color: '#7C3AED', padding: '4px 8px', borderRadius: '4px' }}>🖼️ {ops.filter(o => o.type === 'slider').length}</div>}
+                        {hasSocial && <div style={{ fontSize: '11px', backgroundColor: '#E0F2FE', color: '#0284C7', padding: '4px 8px', borderRadius: '4px' }}>📱 {ops.filter(o => o.type === 'social').length}</div>}
                         {ops.slice(0, 2).map((op, i) => <div key={i} style={{ fontSize: '11px', color: '#6B7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{op.titre.substring(0, 15)}...</div>)}
                         {ops.length > 2 && <div style={{ fontSize: '11px', color: '#9CA3AF' }}>+{ops.length - 2}</div>}
                       </div>
@@ -586,16 +985,35 @@ const CalendarView = ({ entities }) => {
       <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '16px', marginTop: '24px', border: '2px solid #FED7AA', display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><div style={{ width: '16px', height: '16px', backgroundColor: '#DBEAFE', borderRadius: '4px' }}></div><span style={{ fontSize: '14px' }}>📧 Emails</span></div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><div style={{ width: '16px', height: '16px', backgroundColor: '#F3E8FF', borderRadius: '4px' }}></div><span style={{ fontSize: '14px' }}>🖼️ Sliders</span></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><div style={{ width: '16px', height: '16px', backgroundColor: '#E0F2FE', borderRadius: '4px' }}></div><span style={{ fontSize: '14px' }}>📱 Réseaux sociaux</span></div>
       </div>
     </div>
   );
 };
 
 const AnalyticsView = ({ entities }) => {
-  const [stats, setStats] = useState({ total: 0, emails: 0, sliders: 0, validated: 0, inSRE: 0, campaigns: 0 });
+  const [stats, setStats] = useState({ total: 0, emails: 0, sliders: 0, social: 0, validated: 0, inSRE: 0, campaigns: 0 });
   const [loading, setLoading] = useState(true);
+  
   useEffect(() => { loadStats(); }, [entities]);
-  const loadStats = async () => { setLoading(true); const { data: operations, error: opsError } = await supabase.from('operations').select('*'); const { data: campaigns, error: campsError } = await supabase.from('campaigns').select('*'); if (!handleSupabaseError(opsError) && !handleSupabaseError(campsError)) { setStats({ total: operations.length, emails: operations.filter(o => o.type === 'email').length, sliders: operations.filter(o => o.type === 'slider').length, validated: operations.filter(o => o.bat_valide).length, inSRE: operations.filter(o => o.dans_planning_sre).length, campaigns: campaigns.length }); } setLoading(false); };
+  
+  const loadStats = async () => { 
+    setLoading(true); 
+    const { data: operations, error: opsError } = await supabase.from('operations').select('*'); 
+    const { data: campaigns, error: campsError } = await supabase.from('campaigns').select('*'); 
+    if (!handleSupabaseError(opsError) && !handleSupabaseError(campsError)) { 
+      setStats({ 
+        total: operations.length, 
+        emails: operations.filter(o => o.type === 'email').length, 
+        sliders: operations.filter(o => o.type === 'slider').length, 
+        social: operations.filter(o => o.type === 'social').length,
+        validated: operations.filter(o => o.bat_valide).length, 
+        inSRE: operations.filter(o => o.dans_planning_sre).length, 
+        campaigns: campaigns.length 
+      }); 
+    } 
+    setLoading(false); 
+  };
 
   return (
     <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '32px', border: '2px solid #FED7AA' }}>
@@ -603,11 +1021,12 @@ const AnalyticsView = ({ entities }) => {
       {loading ? <div style={{ textAlign: 'center', padding: '40px' }}>Chargement...</div> : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '24px' }}>
           <div style={{ backgroundColor: '#FFF7ED', padding: '32px', borderRadius: '12px' }}><div style={{ fontSize: '48px', fontWeight: '700', color: '#F97316', marginBottom: '8px' }}>{stats.total}</div><div style={{ fontSize: '16px', color: '#6B7280' }}>Total opérations</div></div>
-          <div style={{ backgroundColor: '#DBEAFE', padding: '32px', borderRadius: '12px' }}><div style={{ fontSize: '48px', fontWeight: '700', color: '#3B82F6', marginBottom: '8px' }}>{stats.emails}</div><div style={{ fontSize: '16px', color: '#6B7280' }}>Emails</div></div>
-          <div style={{ backgroundColor: '#F3E8FF', padding: '32px', borderRadius: '12px' }}><div style={{ fontSize: '48px', fontWeight: '700', color: '#A855F7', marginBottom: '8px' }}>{stats.sliders}</div><div style={{ fontSize: '16px', color: '#6B7280' }}>Sliders</div></div>
-          <div style={{ backgroundColor: '#DCFCE7', padding: '32px', borderRadius: '12px' }}><div style={{ fontSize: '48px', fontWeight: '700', color: '#10B981', marginBottom: '8px' }}>{stats.validated}</div><div style={{ fontSize: '16px', color: '#6B7280' }}>BAT validés</div></div>
-          <div style={{ backgroundColor: '#E0E7FF', padding: '32px', borderRadius: '12px' }}><div style={{ fontSize: '48px', fontWeight: '700', color: '#6366F1', marginBottom: '8px' }}>{stats.inSRE}</div><div style={{ fontSize: '16px', color: '#6B7280' }}>Dans SRE</div></div>
-          <div style={{ backgroundColor: '#FCE7F3', padding: '32px', borderRadius: '12px' }}><div style={{ fontSize: '48px', fontWeight: '700', color: '#EC4899', marginBottom: '8px' }}>{stats.campaigns}</div><div style={{ fontSize: '16px', color: '#6B7280' }}>Campagnes</div></div>
+          <div style={{ backgroundColor: '#DBEAFE', padding: '32px', borderRadius: '12px' }}><div style={{ fontSize: '48px', fontWeight: '700', color: '#3B82F6', marginBottom: '8px' }}>{stats.emails}</div><div style={{ fontSize: '16px', color: '#6B7280' }}>📧 Emails</div></div>
+          <div style={{ backgroundColor: '#F3E8FF', padding: '32px', borderRadius: '12px' }}><div style={{ fontSize: '48px', fontWeight: '700', color: '#A855F7', marginBottom: '8px' }}>{stats.sliders}</div><div style={{ fontSize: '16px', color: '#6B7280' }}>🖼️ Sliders</div></div>
+          <div style={{ backgroundColor: '#E0F2FE', padding: '32px', borderRadius: '12px' }}><div style={{ fontSize: '48px', fontWeight: '700', color: '#0284C7', marginBottom: '8px' }}>{stats.social}</div><div style={{ fontSize: '16px', color: '#6B7280' }}>📱 Réseaux sociaux</div></div>
+          <div style={{ backgroundColor: '#DCFCE7', padding: '32px', borderRadius: '12px' }}><div style={{ fontSize: '48px', fontWeight: '700', color: '#10B981', marginBottom: '8px' }}>{stats.validated}</div><div style={{ fontSize: '16px', color: '#6B7280' }}>✅ BAT validés</div></div>
+          <div style={{ backgroundColor: '#E0E7FF', padding: '32px', borderRadius: '12px' }}><div style={{ fontSize: '48px', fontWeight: '700', color: '#6366F1', marginBottom: '8px' }}>{stats.inSRE}</div><div style={{ fontSize: '16px', color: '#6B7280' }}>📋 Dans SRE</div></div>
+          <div style={{ backgroundColor: '#FCE7F3', padding: '32px', borderRadius: '12px' }}><div style={{ fontSize: '48px', fontWeight: '700', color: '#EC4899', marginBottom: '8px' }}>{stats.campaigns}</div><div style={{ fontSize: '16px', color: '#6B7280' }}>📁 Campagnes</div></div>
         </div>
       )}
     </div>
